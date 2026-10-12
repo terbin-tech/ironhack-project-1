@@ -1,42 +1,39 @@
-# Ironhack note - This file is for running in docker compose with prebuilt images
-# Use these if you're stuck, or if you want to start slowly migrating from external images into your own.
+# Local run of the whole stack with our published images.
+# The password below is for local use only; the AWS deployment takes it from Ansible Vault.
 
 services:
   vote:
-    image: pokfinner/vote:latest
- #  build: ./vote
+    image: ${DOCKERHUB_USER:-nitramabuar}/vote:latest
     depends_on:
       redis:
-        condition: service_healthy 
+        condition: service_healthy
     ports:
       - "8080:80"
     networks:
       - back-tier
 
   result:
-    image: pokfinner/result:latest
- #  build: ./result
+    image: ${DOCKERHUB_USER:-nitramabuar}/result:latest
     depends_on:
       db:
-        condition: service_healthy 
+        condition: service_healthy
     ports:
       - "8081:80"
     networks:
       - back-tier
 
   worker:
- #  build: ./worker
-    image: pokfinner/worker:latest
+    image: ${DOCKERHUB_USER:-nitramabuar}/worker:latest
     depends_on:
       redis:
-        condition: service_healthy 
+        condition: service_healthy
       db:
-        condition: service_healthy 
+        condition: service_healthy
     networks:
       - back-tier
 
   redis:
-    image: redis:alpine
+    image: redis:8
     volumes:
       - "./healthchecks:/healthchecks"
     healthcheck:
@@ -46,12 +43,13 @@ services:
       - back-tier
 
   db:
-    image: postgres:15-alpine
+    image: postgres:18
     environment:
       POSTGRES_USER: "postgres"
       POSTGRES_PASSWORD: "postgres"
     volumes:
-      - "db-data:/var/lib/postgresql/data"
+      # Postgres 18 images keep data under /var/lib/postgresql, not /var/lib/postgresql/data
+      - "db-data:/var/lib/postgresql"
       - "./healthchecks:/healthchecks"
     healthcheck:
       test: /healthchecks/postgres.sh
