@@ -1,3 +1,13 @@
+# Terraform: state, plans, local caches and per-machine inputs never go to git.
+# .terraform.lock.hcl is committed on purpose.
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform.tfstate.lock.info
+*.tfvars
+infra/main/backend.hcl
+
 # macOS and .NET build output
 .DS_Store
 worker/bin/
