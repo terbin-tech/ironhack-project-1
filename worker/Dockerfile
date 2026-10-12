@@ -1,28 +1,27 @@
-# Stage 1: Build
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+# Build with the .NET 10 SDK (current LTS)
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
-# Copy the project file and restore dependencies
 COPY Worker.csproj .
 RUN dotnet restore
 
-# Copy the rest of the source code and build
 COPY . .
 RUN dotnet publish -c Release -o /app/publish
 
-# Stage 2: Runtime
-FROM mcr.microsoft.com/dotnet/runtime:8.0 AS runtime
+# Run on the .NET 10 runtime
+FROM mcr.microsoft.com/dotnet/runtime:10.0 AS runtime
 WORKDIR /app
 
-# Copy the published output from the build stage
 COPY --from=build /app/publish ./
 
-# Set environment variables (can be overridden at runtime)
+# The database user and password come from the environment (Ansible sets them);
+# Program.cs falls back to postgres/postgres when they are unset.
 ENV DB_HOST=db
-ENV DB_USERNAME=postgres
-ENV DB_PASSWORD=postgres
 ENV DB_NAME=postgres
 ENV REDIS_HOST=redis
 
-# Define the entry point
+# app (uid 1654, the image's APP_UID), the unprivileged user .NET images ship
+USER 1654
+
+# checkov:skip=CKV_DOCKER_2:the worker serves no port and the image has no curl; Docker's unless-stopped policy restarts it when it exits
 ENTRYPOINT ["dotnet", "Worker.dll"]
