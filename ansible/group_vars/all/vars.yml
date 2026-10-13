@@ -1,0 +1,5 @@
+---
+# There is no ansible.cfg: Ansible ignores one in a world-writable directory,
+# which every directory on a WSL /mnt/c checkout is. SSH settings live here instead.
+ansible_user: ubuntu
+ansible_ssh_common_args: "-F {{ inventory_dir }}/ssh_config"

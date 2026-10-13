@@ -1,0 +1,64 @@
+---
+# Docker Engine from Docker's own apt repository, as docs.docker.com/engine/install/ubuntu describes.
+
+- name: Wait for cloud-init to finish first-boot setup
+  ansible.builtin.command: cloud-init status --wait
+  changed_when: false
+
+- name: Remove unofficial Docker packages that conflict with Docker Engine
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-compose
+      - docker-compose-v2
+      - docker-doc
+      - docker-buildx
+      - podman-docker
+    state: absent
+    lock_timeout: 300
+
+- name: Install apt prerequisites and the Python libraries the modules need
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - python3-debian
+      - python3-requests
+    update_cache: true
+    cache_valid_time: 3600
+    lock_timeout: 300
+
+- name: Add Docker's apt repository
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: deb
+    uris: https://download.docker.com/linux/ubuntu
+    suites: "{{ ansible_facts['distribution_release'] }}"
+    components: stable
+    architectures: amd64
+    signed_by: https://download.docker.com/linux/ubuntu/gpg
+
+- name: Install Docker Engine
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    update_cache: true
+    lock_timeout: 300
+
+- name: Start Docker now and at boot
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Let the ubuntu user run docker without sudo
+  ansible.builtin.user:
+    name: ubuntu
+    groups: docker
+    append: true
+
+- name: Reconnect so the new group membership applies
+  ansible.builtin.meta: reset_connection
