@@ -1,0 +1,68 @@
+---
+# End to end: a vote cast on the frontend travels through Redis and the worker into Postgres.
+
+- name: Gather every host's facts for the private IPs
+  hosts: all
+  gather_facts: true
+  tasks: []
+
+- name: Cast a vote and watch it reach Postgres
+  hosts: frontend
+  gather_facts: false
+  vars:
+    psql: "docker exec db psql -U {{ db_user }} -d {{ db_name }} -tAc"
+  tasks:
+    - name: Redis on the backend is reachable from the frontend
+      ansible.builtin.wait_for:
+        host: "{{ backend_ip }}"
+        port: 6379
+        timeout: 10
+
+    - name: Postgres on the db host is reachable from the frontend
+      ansible.builtin.wait_for:
+        host: "{{ db_ip }}"
+        port: 5432
+        timeout: 10
+
+    # Unique per run, so the check below sees this vote and no other voter's.
+    - name: Pick a voter id for the smoke vote
+      ansible.builtin.set_fact:
+        marker: "smoke-{{ lookup('ansible.builtin.pipe', 'date +%s%N') }}"
+
+    # vote uses the voter_id cookie as the voter id and the worker stores it in votes.id.
+    # The votes table has no unique key, so a repeated POST would add a row.
+    - name: Cast a vote
+      ansible.builtin.uri:
+        # checkov:skip=CKV2_ANSIBLE_1:the app serves HTTP only; HTTPS is out of scope
+        url: http://localhost/
+        method: POST
+        body_format: form-urlencoded
+        body:
+          vote: a
+        headers:
+          Cookie: "voter_id={{ marker }}"
+
+    # Retried: right after a deploy the worker may not have created the table yet.
+    - name: Wait for the worker to store it
+      ansible.builtin.command: "{{ psql }} \"select count(*) from votes where id = '{{ marker }}'\""
+      delegate_to: "{{ groups['db'][0] }}"
+      register: stored
+      changed_when: false
+      until: stored.rc == 0 and (stored.stdout | int) >= 1
+      retries: 15
+      delay: 2
+
+    - name: Count all votes
+      ansible.builtin.command: "{{ psql }} 'select count(*) from votes'"
+      delegate_to: "{{ groups['db'][0] }}"
+      register: total
+      changed_when: false
+
+    - name: The result page answers
+      ansible.builtin.uri:
+        # checkov:skip=CKV2_ANSIBLE_1:the app serves HTTP only; HTTPS is out of scope
+        url: http://localhost:8080/
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: "vote {{ marker }} reached Postgres; {{ total.stdout }} votes in total"
