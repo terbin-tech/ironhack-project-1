@@ -2,4 +2,17 @@
 # There is no ansible.cfg: Ansible ignores one in a world-writable directory,
 # which every directory on a WSL /mnt/c checkout is. SSH settings live here instead.
 ansible_user: ubuntu
+# Skips interpreter discovery, which warns on every run.
+ansible_python_interpreter: /usr/bin/python3
 ansible_ssh_common_args: "-F {{ inventory_dir }}/ssh_config"
+
+dockerhub_user: nitramabuar
+
+# The postgres image creates a database named after its user.
+db_user: postgres
+db_name: postgres
+db_password: "{{ vault_db_password }}"
+
+# Private IPs from gathered facts; the plays gather them even under --limit.
+backend_ip: "{{ hostvars[groups['backend'][0]]['ansible_facts']['default_ipv4']['address'] }}"
+db_ip: "{{ hostvars[groups['db'][0]]['ansible_facts']['default_ipv4']['address'] }}"

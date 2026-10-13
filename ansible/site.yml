@@ -4,3 +4,37 @@
   become: true
   roles:
     - docker
+
+- name: Database tier
+  hosts: db
+  become: true
+  roles:
+    - db
+
+- name: Backend tier
+  hosts: backend
+  become: true
+  pre_tasks:
+    - name: Gather the db host's facts so its private IP is known even under --limit
+      ansible.builtin.setup:
+        gather_subset:
+          - network
+      delegate_to: "{{ item }}"
+      delegate_facts: true
+      loop: "{{ groups['db'] }}"
+  roles:
+    - backend
+
+- name: Frontend tier
+  hosts: frontend
+  become: true
+  pre_tasks:
+    - name: Gather the backend and db hosts' facts so their private IPs are known even under --limit
+      ansible.builtin.setup:
+        gather_subset:
+          - network
+      delegate_to: "{{ item }}"
+      delegate_facts: true
+      loop: "{{ groups['backend'] + groups['db'] }}"
+  roles:
+    - frontend

@@ -1,0 +1,23 @@
+---
+- name: Pull the Postgres image
+  community.docker.docker_image_pull:
+    name: postgres
+    tag: "18"
+
+- name: Create the data volume
+  community.docker.docker_volume:
+    name: db-data
+
+- name: Run Postgres
+  community.docker.docker_container:
+    name: db
+    image: postgres:18
+    restart_policy: unless-stopped
+    published_ports:
+      - "5432:5432"
+    env:
+      POSTGRES_USER: "{{ db_user }}"
+      POSTGRES_PASSWORD: "{{ db_password }}"
+    volumes:
+      # Postgres 18 images keep data under /var/lib/postgresql, not /var/lib/postgresql/data.
+      - db-data:/var/lib/postgresql

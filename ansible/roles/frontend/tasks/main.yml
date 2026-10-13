@@ -1,0 +1,31 @@
+---
+- name: Pull the vote and result images
+  community.docker.docker_image_pull:
+    name: "{{ dockerhub_user }}/{{ item }}"
+    tag: latest
+  loop:
+    - vote
+    - result
+
+- name: Run vote
+  community.docker.docker_container:
+    name: vote
+    image: "{{ dockerhub_user }}/vote:latest"
+    restart_policy: unless-stopped
+    published_ports:
+      - "80:80"
+    env:
+      REDIS_HOST: "{{ backend_ip }}"
+
+- name: Run result
+  community.docker.docker_container:
+    name: result
+    image: "{{ dockerhub_user }}/result:latest"
+    restart_policy: unless-stopped
+    published_ports:
+      - "8080:80"
+    env:
+      PG_HOST: "{{ db_ip }}"
+      PG_USER: "{{ db_user }}"
+      PG_PASSWORD: "{{ db_password }}"
+      PG_DATABASE: "{{ db_name }}"

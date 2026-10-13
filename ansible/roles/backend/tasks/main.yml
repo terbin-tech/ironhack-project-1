@@ -1,0 +1,38 @@
+---
+- name: Pull the Redis and worker images
+  community.docker.docker_image_pull:
+    name: "{{ item.name }}"
+    tag: "{{ item.tag }}"
+  loop:
+    - { name: redis, tag: "8" }
+    - { name: "{{ dockerhub_user }}/worker", tag: latest }
+
+# Same-host traffic: the worker finds Redis by container name on this network.
+- name: Create the backend network
+  community.docker.docker_network:
+    name: backend
+
+- name: Run Redis
+  community.docker.docker_container:
+    name: redis
+    image: redis:8
+    restart_policy: unless-stopped
+    # Published for vote on the frontend host; the backend security group admits only the frontend.
+    published_ports:
+      - "6379:6379"
+    networks:
+      - name: backend
+
+- name: Run the worker
+  community.docker.docker_container:
+    name: worker
+    image: "{{ dockerhub_user }}/worker:latest"
+    restart_policy: unless-stopped
+    networks:
+      - name: backend
+    env:
+      REDIS_HOST: redis
+      DB_HOST: "{{ db_ip }}"
+      DB_USERNAME: "{{ db_user }}"
+      DB_PASSWORD: "{{ db_password }}"
+      DB_NAME: "{{ db_name }}"
