@@ -1,0 +1,4 @@
+# Copy to terraform.tfvars and set your own public IP; terraform.tfvars is gitignored.
+# scripts/check.sh also passes this file to Checkov so the security group rules expand.
+# 192.0.2.10 is a documentation address (RFC 5737).
+admin_cidr = "192.0.2.10/32"
