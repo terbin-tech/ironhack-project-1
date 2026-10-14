@@ -16,8 +16,6 @@ locals {
 }
 
 resource "aws_vpc" "this" {
-  #checkov:skip=CKV2_AWS_11:flow logs belong to the CloudWatch add-on
-
   cidr_block           = "10.0.0.0/16"
   enable_dns_support   = true
   enable_dns_hostnames = true

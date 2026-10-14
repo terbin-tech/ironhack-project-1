@@ -2,3 +2,6 @@
 # scripts/check.sh also passes this file to Checkov so the security group rules expand.
 # 192.0.2.10 is a documentation address (RFC 5737).
 admin_cidr = "192.0.2.10/32"
+
+# CloudWatch alarms email this address; confirm the link AWS sends after the first apply.
+alarm_email = "you@example.com"

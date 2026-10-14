@@ -21,8 +21,7 @@ resource "aws_instance" "this" {
 
   #checkov:skip=CKV_AWS_88:the bastion (SSH entry) and the frontend (vote, result) are public by design; the load balancer add-on removes the frontend's public IP
   #checkov:skip=CKV_AWS_135:t3 instances are always EBS-optimized
-  #checkov:skip=CKV2_AWS_41:no host calls AWS APIs yet; the CloudWatch add-on adds an instance role
-  #checkov:skip=CKV_AWS_126:basic monitoring is enough until the CloudWatch add-on
+  #checkov:skip=CKV_AWS_126:5-minute basic metrics are enough for an email alarm on these hosts
 
   # insecure_value: a public AMI id, so keep it readable in plan output.
   ami                         = data.aws_ssm_parameter.ubuntu.insecure_value
@@ -31,10 +30,13 @@ resource "aws_instance" "this" {
   vpc_security_group_ids      = [aws_security_group.this[each.key].id]
   key_name                    = aws_key_pair.this.key_name
   associate_public_ip_address = each.value.public
+  iam_instance_profile        = aws_iam_instance_profile.ec2.name
 
+  # Hop limit 1: only host processes (the CloudWatch agent, the Docker daemon's
+  # awslogs driver) use the instance role; containers cannot reach it.
   metadata_options {
     http_tokens                 = "required"
-    http_put_response_hop_limit = 2
+    http_put_response_hop_limit = 1
   }
 
   root_block_device {

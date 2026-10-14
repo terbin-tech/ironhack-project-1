@@ -42,3 +42,13 @@ variable "ssh_private_key_path" {
   type        = string
   default     = "~/.ssh/ironhack-project-1"
 }
+
+variable "alarm_email" {
+  description = "Address the CloudWatch alarms email through SNS; AWS sends it a confirmation link first."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[^@[:space:]]+@[^@[:space:]]+[.][^@[:space:]]+$", var.alarm_email))
+    error_message = "alarm_email must be an email address, e.g. you@example.com."
+  }
+}
