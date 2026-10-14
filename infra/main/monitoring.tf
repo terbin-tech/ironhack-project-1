@@ -206,11 +206,17 @@ data "aws_iam_policy_document" "flow_log_assume" {
 
 data "aws_iam_policy_document" "flow_log" {
   statement {
-    actions = ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogGroups", "logs:DescribeLogStreams"]
+    actions = ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"]
     resources = [
       aws_cloudwatch_log_group.this["vpc-flow"].arn,
       "${aws_cloudwatch_log_group.this["vpc-flow"].arn}:*",
     ]
+  }
+
+  # DescribeLogGroups accepts no resource scoping and only lists group names.
+  statement {
+    actions   = ["logs:DescribeLogGroups"]
+    resources = ["*"]
   }
 }
 
