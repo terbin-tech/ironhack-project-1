@@ -1,10 +1,7 @@
 ---
-# There is no ansible.cfg: Ansible ignores one in a world-writable directory,
-# which every directory on a WSL /mnt/c checkout is. SSH settings live here instead.
-ansible_user: ubuntu
+# SSH connection settings live in inventory.ini.
 # Skips interpreter discovery, which warns on every run.
 ansible_python_interpreter: /usr/bin/python3
-ansible_ssh_common_args: "-F {{ inventory_dir }}/ssh_config"
 
 dockerhub_user: nitramabuar
 
