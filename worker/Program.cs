@@ -1,4 +1,5 @@
 using System;
+using System.Data;
 using System.Data.Common;
 using System.Linq;
 using System.Net;
@@ -12,6 +13,13 @@ namespace Worker
 {
     public class Program
     {
+        // The vote app pushes to "votes". The worker moves each vote to "votes:processing"
+        // while it stores it, so a crash or a lost connection cannot drop it (the reliable
+        // queue pattern from the Redis LMOVE docs). Votes Postgres refuses go to "votes:failed".
+        private const string VotesKey = "votes";
+        private const string ProcessingKey = "votes:processing";
+        private const string FailedKey = "votes:failed";
+
         public static int Main(string[] args)
         {
             try
@@ -21,22 +29,19 @@ namespace Worker
                 var dbUsername = Environment.GetEnvironmentVariable("DB_USERNAME") ?? "postgres";
                 var dbPassword = Environment.GetEnvironmentVariable("DB_PASSWORD") ?? "postgres";
                 var dbName = Environment.GetEnvironmentVariable("DB_NAME") ?? "postgres";
-                
+
                 var redisHost = Environment.GetEnvironmentVariable("REDIS_HOST") ?? "redis";
 
-                // Construct the connection strings
+                // Construct the connection strings; only the parts without the password are logged
                 var pgConnectionString = $"Server={dbHost};Username={dbUsername};Password={dbPassword};Database={dbName}";
-                Console.WriteLine($"Database connection string: {pgConnectionString}");
+                Console.WriteLine($"Database connection: Server={dbHost};Username={dbUsername};Database={dbName}");
                 var redisConnectionString = redisHost;
 
                 var pgsql = OpenDbConnection(pgConnectionString);
                 var redisConn = OpenRedisConnection(redisConnectionString);
                 var redis = redisConn.GetDatabase();
 
-                // Keep alive is not implemented in Npgsql yet. This workaround was recommended:
-                // https://github.com/npgsql/npgsql/issues/1214#issuecomment-235828359
-                var keepAliveCommand = pgsql.CreateCommand();
-                keepAliveCommand.CommandText = "SELECT 1";
+                RequeueUnfinished(redis);
 
                 var definition = new { vote = "", voter_id = "" };
                 while (true)
@@ -52,33 +57,107 @@ namespace Worker
                         redis = redisConn.GetDatabase();
                     }
 
-                    string json = redis.ListLeftPopAsync("votes").Result;
-                    if (json != null)
+                    // Take the oldest vote, keeping it in the processing list until Postgres has it
+                    string? json = redis.ListMove(VotesKey, ProcessingKey, ListSide.Left, ListSide.Right);
+                    if (json == null)
                     {
-                        var vote = JsonConvert.DeserializeAnonymousType(json, definition);
-                        Console.WriteLine($"Processing vote for '{vote.vote}' by '{vote.voter_id}'");
+                        pgsql = KeepAlive(pgsql, pgConnectionString);
+                        continue;
+                    }
 
-                        // Reconnect DB if down
-                        if (!pgsql.State.Equals(System.Data.ConnectionState.Open))
-                        {
-                            Console.WriteLine("Reconnecting DB");
-                            pgsql = OpenDbConnection(pgConnectionString);
-                        }
-                        else
-                        { // Normal +1 vote requested
-                            UpdateVote(pgsql, vote.voter_id, vote.vote);
-                        }
-                    }
-                    else
+                    var vote = JsonConvert.DeserializeAnonymousType(json, definition);
+                    if (vote == null || string.IsNullOrEmpty(vote.vote))
                     {
-                        keepAliveCommand.ExecuteNonQuery();
+                        Console.Error.WriteLine($"Unreadable vote moved to {FailedKey}");
+                        MoveToFailed(redis, json);
+                        continue;
                     }
+
+                    Console.WriteLine($"Processing vote for '{vote.vote}' by '{vote.voter_id}'");
+                    pgsql = StoreVote(pgsql, pgConnectionString, redis, json, vote.voter_id, vote.vote);
                 }
             }
             catch (Exception ex)
             {
                 Console.Error.WriteLine(ex.ToString());
                 return 1;
+            }
+        }
+
+        // Votes a previous run took but never stored go back to the front of the queue, oldest first.
+        private static void RequeueUnfinished(IDatabase redis)
+        {
+            var requeued = 0;
+            while (!redis.ListMove(ProcessingKey, VotesKey, ListSide.Right, ListSide.Left).IsNull)
+            {
+                requeued++;
+            }
+            if (requeued > 0)
+            {
+                Console.WriteLine($"Requeued {requeued} unfinished votes");
+            }
+        }
+
+        // Stores one vote, reconnecting and retrying until Postgres accepts or rejects it.
+        private static NpgsqlConnection StoreVote(NpgsqlConnection connection, string connectionString, IDatabase redis, string json, string voterId, string vote)
+        {
+            while (true)
+            {
+                try
+                {
+                    if (connection.FullState != ConnectionState.Open)
+                    {
+                        Console.WriteLine("Reconnecting DB");
+                        connection.Dispose();
+                        connection = OpenDbConnection(connectionString);
+                    }
+
+                    InsertVote(connection, voterId, vote);
+                    redis.ListRemove(ProcessingKey, json, 1);
+                    return connection;
+                }
+                catch (PostgresException ex) when (!ex.IsTransient && connection.FullState == ConnectionState.Open)
+                {
+                    // Postgres refused this vote itself (for example a value over 255 characters);
+                    // retrying cannot help, and keeping it would block every vote behind it.
+                    Console.Error.WriteLine($"Vote by '{voterId}' refused ({ex.SqlState}), moved to {FailedKey}");
+                    MoveToFailed(redis, json);
+                    return connection;
+                }
+                catch (Exception ex) when (IsConnectionFailure(ex))
+                {
+                    // The connection broke or timed out: the vote stays in the processing list
+                    // and the next pass reconnects if needed and tries the same vote again.
+                    Console.Error.WriteLine($"Storing vote by '{voterId}' failed ({ex.GetType().Name}), retrying");
+                    Thread.Sleep(1000);
+                }
+            }
+        }
+
+        private static bool IsConnectionFailure(Exception ex)
+            => ex is DbException || ex is InvalidOperationException || ex is SocketException || ex is TimeoutException;
+
+        private static void MoveToFailed(IDatabase redis, string json)
+        {
+            redis.ListRightPush(FailedKey, json);
+            redis.ListRemove(ProcessingKey, json, 1);
+        }
+
+        // Keeps an idle connection open; a failure reconnects instead of ending the worker.
+        private static NpgsqlConnection KeepAlive(NpgsqlConnection connection, string connectionString)
+        {
+            try
+            {
+                using var command = connection.CreateCommand();
+                command.CommandText = "SELECT 1";
+                command.ExecuteNonQuery();
+                return connection;
+            }
+            catch (Exception ex) when (IsConnectionFailure(ex))
+            {
+                Console.Error.WriteLine("Database connection lost, reconnecting");
+                connection.Dispose();
+                return OpenDbConnection(connectionString);
             }
         }
 
@@ -146,25 +225,15 @@ namespace Worker
                 .First(a => a.AddressFamily == AddressFamily.InterNetwork)
                 .ToString();
 
-        private static void UpdateVote(NpgsqlConnection connection, string voterId, string vote)
+        // The votes table has no unique key, so every stored vote is one row (a changed
+        // vote adds a row too, as before).
+        private static void InsertVote(NpgsqlConnection connection, string voterId, string vote)
         {
-            var command = connection.CreateCommand();
-            try
-            {
-                command.CommandText = "INSERT INTO votes (id, vote) VALUES (@id, @vote)";
-                command.Parameters.AddWithValue("@id", voterId);
-                command.Parameters.AddWithValue("@vote", vote);
-                command.ExecuteNonQuery();
-            }
-            catch (DbException)
-            {
-                command.CommandText = "UPDATE votes SET vote = @vote WHERE id = @id";
-                command.ExecuteNonQuery();
-            }
-            finally
-            {
-                command.Dispose();
-            }
+            using var command = connection.CreateCommand();
+            command.CommandText = "INSERT INTO votes (id, vote) VALUES (@id, @vote)";
+            command.Parameters.AddWithValue("@id", voterId);
+            command.Parameters.AddWithValue("@vote", vote);
+            command.ExecuteNonQuery();
         }
     }
 }
