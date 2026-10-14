@@ -65,8 +65,8 @@ namespace Worker
                         continue;
                     }
 
-                    var vote = JsonConvert.DeserializeAnonymousType(json, definition);
-                    if (vote == null || string.IsNullOrEmpty(vote.vote))
+                    var vote = ParseVote(json, definition);
+                    if (vote == null || string.IsNullOrEmpty(vote.vote) || string.IsNullOrEmpty(vote.voter_id))
                     {
                         Console.Error.WriteLine($"Unreadable vote moved to {FailedKey}");
                         MoveToFailed(redis, json);
@@ -81,6 +81,19 @@ namespace Worker
             {
                 Console.Error.WriteLine(ex.ToString());
                 return 1;
+            }
+        }
+
+        // Returns null for text that is not a JSON vote, so one bad entry cannot crash-loop the worker.
+        private static T? ParseVote<T>(string json, T definition) where T : class
+        {
+            try
+            {
+                return JsonConvert.DeserializeAnonymousType(json, definition);
+            }
+            catch (JsonException)
+            {
+                return null;
             }
         }
 
@@ -113,8 +126,7 @@ namespace Worker
                     }
 
                     InsertVote(connection, voterId, vote);
-                    redis.ListRemove(ProcessingKey, json, 1);
-                    return connection;
+                    break;
                 }
                 catch (PostgresException ex) when (!ex.IsTransient && connection.FullState == ConnectionState.Open)
                 {
@@ -132,6 +144,11 @@ namespace Worker
                     Thread.Sleep(1000);
                 }
             }
+
+            // Outside the retry: a Redis failure here must not insert the vote again. It ends the
+            // process instead, and the startup requeue then costs at most one duplicate.
+            redis.ListRemove(ProcessingKey, json, 1);
+            return connection;
         }
 
         private static bool IsConnectionFailure(Exception ex)
@@ -139,8 +156,10 @@ namespace Worker
 
         private static void MoveToFailed(IDatabase redis, string json)
         {
-            redis.ListRightPush(FailedKey, json);
-            redis.ListRemove(ProcessingKey, json, 1);
+            var transaction = redis.CreateTransaction();
+            _ = transaction.ListRightPushAsync(FailedKey, json);
+            _ = transaction.ListRemoveAsync(ProcessingKey, json, 1);
+            transaction.Execute();
         }
 
         // Keeps an idle connection open; a failure reconnects instead of ending the worker.
