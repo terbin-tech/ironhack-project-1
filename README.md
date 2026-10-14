@@ -93,7 +93,8 @@ ansible-playbook -i ansible/inventory.ini --vault-password-file ~/.ansible/ironh
 - Security groups chain tier to tier: Redis only accepts the frontend, Postgres only the frontend and backend, and SSH to private hosts only comes through the bastion. Terraform removes the allow-all egress rule AWS adds to new security groups, so every outbound flow is declared.
 - Ansible reaches the private hosts with `ProxyJump` through the frontend, using an `ssh_config` that Terraform generates. There is no `ansible.cfg`, because Ansible ignores one in a world-writable directory (as on a WSL checkout of a Windows drive); the SSH settings live in `group_vars`.
 - Docker is installed from Docker's own apt repository rather than Ubuntu's `docker.io` package.
-- The Postgres password is kept in Ansible Vault. Redis has no password (the vote app cannot send one), so its security group is its only protection.
+- The Postgres password is kept in Ansible Vault and never written to a log: result and the worker log the host, user and database only. Redis has no password (the vote app cannot send one), so its security group is its only protection.
+- Votes survive a database restart: the worker moves each vote from `votes` to a `votes:processing` list in Redis and removes it only after Postgres has stored it, the pattern the Redis `LMOVE` docs describe for a reliable queue. Votes that cannot be read or that Postgres refuses land in `votes:failed`. result polls through its connection pool, so it recovers on its own.
 - HTTPS is out of scope: there is no domain or certificate.
 - The root volumes are encrypted, and every app container runs as an unprivileged user.
 
