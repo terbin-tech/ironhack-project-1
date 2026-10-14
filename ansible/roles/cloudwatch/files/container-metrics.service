@@ -1,0 +1,8 @@
+[Unit]
+Description=Report container health and restarts to the CloudWatch agent
+After=docker.service amazon-cloudwatch-agent.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/container-metrics.sh

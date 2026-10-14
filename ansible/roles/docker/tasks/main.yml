@@ -48,6 +48,16 @@
     update_cache: true
     lock_timeout: 300
 
+# Daemon defaults apply only to containers created after the restart.
+- name: Send container logs to CloudWatch Logs by default
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    content: "{{ docker_daemon_config | to_nice_json }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Docker
+
 - name: Start Docker now and at boot
   ansible.builtin.service:
     name: docker

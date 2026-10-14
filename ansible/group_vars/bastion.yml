@@ -1,0 +1,3 @@
+---
+# The bastion runs no containers.
+cloudwatch_container_metrics: false

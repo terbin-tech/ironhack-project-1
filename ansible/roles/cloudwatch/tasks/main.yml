@@ -1,0 +1,65 @@
+---
+# The CloudWatch agent: memory and disk metrics, the SSH log, and a StatsD
+# listener that container-metrics.sh reports container health to.
+
+- name: Download the CloudWatch agent package
+  ansible.builtin.get_url:
+    url: "{{ cloudwatch_agent_deb_url }}"
+    dest: /var/cache/amazon-cloudwatch-agent.deb
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install the CloudWatch agent
+  ansible.builtin.apt:
+    deb: /var/cache/amazon-cloudwatch-agent.deb
+    lock_timeout: 300
+
+- name: Write the agent configuration
+  ansible.builtin.template:
+    src: amazon-cloudwatch-agent.json.j2
+    dest: "{{ cloudwatch_agent_config }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Apply the agent configuration
+
+# Two tasks with the same condition rather than a block: Checkov's CKV2_ANSIBLE_3
+# fails a block without a rescue.
+- name: Install the container metrics script
+  ansible.builtin.copy:
+    src: container-metrics.sh
+    dest: /usr/local/bin/container-metrics.sh
+    owner: root
+    group: root
+    mode: "0755"
+  when: cloudwatch_container_metrics
+
+- name: Install the container metrics service and timer
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - container-metrics.service
+    - container-metrics.timer
+  when: cloudwatch_container_metrics
+  notify: Reload systemd units
+
+- name: Apply configuration changes before starting the services
+  ansible.builtin.meta: flush_handlers
+
+- name: Keep the agent running now and at boot
+  ansible.builtin.service:
+    name: amazon-cloudwatch-agent
+    state: started
+    enabled: true
+
+- name: Keep the container metrics timer running now and at boot
+  ansible.builtin.systemd_service:
+    name: container-metrics.timer
+    state: started
+    enabled: true
+  when: cloudwatch_container_metrics

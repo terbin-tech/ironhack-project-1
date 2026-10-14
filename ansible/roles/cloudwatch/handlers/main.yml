@@ -1,0 +1,11 @@
+---
+# -s restarts the agent with the new configuration and enables it at boot.
+- name: Apply the agent configuration
+  ansible.builtin.command: >-
+    /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl
+    -a fetch-config -m ec2 -s -c file:{{ cloudwatch_agent_config }}
+  changed_when: true
+
+- name: Reload systemd units
+  ansible.builtin.systemd_service:
+    daemon_reload: true

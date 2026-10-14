@@ -1,0 +1,7 @@
+---
+# Hosts that run containers report container health and restarts; the bastion does not.
+cloudwatch_container_metrics: true
+
+# AWS's region-pinned Ubuntu amd64 package. get_url downloads it once to a fixed path.
+cloudwatch_agent_deb_url: "https://amazoncloudwatch-agent-{{ aws_region }}.s3.{{ aws_region }}.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb"
+cloudwatch_agent_config: /opt/aws/amazon-cloudwatch-agent/bin/config.json

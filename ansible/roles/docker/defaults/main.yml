@@ -1,0 +1,10 @@
+---
+# Containers log to CloudWatch Logs by default, one stream per container.
+# The tag is Docker's own template syntax, so Jinja must leave it alone.
+# Non-blocking: a CloudWatch or IAM problem can never stop a container from starting.
+docker_daemon_config:
+  log-driver: awslogs
+  log-opts:
+    awslogs-group: "{{ name_prefix }}containers"
+    tag: !unsafe "{{.Name}}/{{.ID}}"
+    mode: non-blocking

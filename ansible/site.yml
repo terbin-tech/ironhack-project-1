@@ -5,6 +5,16 @@
   roles:
     - docker
 
+- name: CloudWatch agent on every host
+  hosts: all
+  become: true
+  pre_tasks:
+    - name: Wait for cloud-init to finish first-boot setup
+      ansible.builtin.command: cloud-init status --wait
+      changed_when: false
+  roles:
+    - cloudwatch
+
 - name: Database tier
   hosts: db
   become: true
