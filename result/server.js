@@ -1,5 +1,4 @@
 var express = require('express'),
-    async = require('async'),
     { Pool } = require('pg'),
     cookieParser = require('cookie-parser'),
     path = require('path'),
@@ -42,34 +41,28 @@ var pgPassword = process.env.PG_PASSWORD || 'postgres';
 var pgDatabase = process.env.PG_DATABASE || 'postgres';
 
 var connectionString = `postgresql://${pgUser}:${pgPassword}@${pgHost}:${pgPort}/${pgDatabase}`;
-console.log(connectionString);
+console.log(`Connecting to postgresql://${pgUser}@${pgHost}:${pgPort}/${pgDatabase}`);
 
 var { Pool } = require('pg');
-var pool = new Pool({ connectionString: connectionString });
+// Every poll borrows a connection from the pool, so a Postgres restart or failover
+// costs a failed poll instead of freezing the page. node-postgres waits forever by
+// default; the timeouts stop a dead connection from stalling the poll.
+var pool = new Pool({
+  connectionString: connectionString,
+  query_timeout: 5000,
+  connectionTimeoutMillis: 5000
+});
 
-async.retry(
-  { times: 1000, interval: 1000 },
-  function (callback) {
-    pool.connect(function (err, client, done) {
-      if (err) {
-        console.error("Waiting for db");
-      }
-      callback(err, client);
-    });
-  },
-  function (err, client) {
-    if (err) {
-      return console.error("Giving up");
-    }
-    console.log("Connected to db");
-    getVotes(client);
-  }
-);
+// An idle client whose connection drops emits 'error' on the pool; with no
+// listener, Node would treat it as uncaught and end the process.
+pool.on('error', function (err) {
+  console.error("Idle database client failed: " + err.message);
+});
 
-function getVotes(client) {
-  client.query('SELECT vote, COUNT(id) AS count FROM votes GROUP BY vote', [], function (err, result) {
+function getVotes() {
+  pool.query('SELECT vote, COUNT(id) AS count FROM votes GROUP BY vote', [], function (err, result) {
     if (err) {
-      console.error("Error performing query: " + err);
+      console.error("Waiting for db: " + err.message);
     } else {
       var votes = collectVotesFromResult(result);
 
@@ -78,10 +71,12 @@ function getVotes(client) {
       resultNamespace.emit("scores", JSON.stringify(votes));
     }
 
-    // Repeat periodically
-    setTimeout(function () { getVotes(client); }, 1000);
+    // Repeat periodically, after a success or a failure alike
+    setTimeout(getVotes, 1000);
   });
 }
+
+getVotes();
 
 function collectVotesFromResult(result) {
   var votes = { a: 0, b: 0 };
@@ -104,6 +99,11 @@ app.use("/result", express.static(path.join(__dirname, 'views')));
 app.get(['/', '/result'], function (req, res) {
   res.sendFile(path.resolve(__dirname, 'views', 'index.html'));
 });
+
+// Keep idle connections open longer than the load balancer's 60-second idle
+// timeout, so the server never closes one the load balancer is about to reuse.
+server.keepAliveTimeout = 65000;
+server.headersTimeout = 66000;
 
 // Start server
 server.listen(port, function () {
