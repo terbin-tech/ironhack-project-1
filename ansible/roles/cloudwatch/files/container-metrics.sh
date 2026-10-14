@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Sends two gauges to the CloudWatch agent's StatsD listener (UDP 127.0.0.1:8125):
-#   containers_down     containers not running, or running but unhealthy
+#   containers_down     containers not in status running (restarting counts as down),
+#                       or running but unhealthy
 #   container_restarts  restarts since the previous run
 # A systemd timer runs it every minute; the alarms treat a missing minute as a
 # dead host, agent or timer.
@@ -20,11 +21,22 @@ else
   baseline=true
 fi
 
+# Capture docker's output first: a docker error must exit here, before anything
+# is sent or the state file is written, so the alarms see missing data, not zeros.
+ids=$(docker ps --all --quiet)
+info=""
+if [[ -n "${ids}" ]]; then
+  info=$(printf '%s\n' "${ids}" | xargs docker inspect --format \
+    '{{.Id}} {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} {{.RestartCount}}')
+fi
+
 down=0
 restarts=0
 current=""
-while read -r id running health count; do
-  if [[ "${running}" != "true" || "${health}" == "unhealthy" ]]; then
+while read -r id status health count; do
+  [[ -n "${id}" ]] || continue
+  # State.Running stays true while a container restarts, so read the status.
+  if [[ "${status}" != "running" || "${health}" == "unhealthy" ]]; then
     down=$((down + 1))
   fi
   before=${previous["${id}"]:-0}
@@ -34,8 +46,7 @@ while read -r id running health count; do
   fi
   restarts=$((restarts + count - before))
   current+="${id} ${count}"$'\n'
-done < <(docker ps --all --quiet | xargs --no-run-if-empty docker inspect --format \
-  '{{.Id}} {{.State.Running}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} {{.RestartCount}}')
+done <<<"${info}"
 
 printf '%s' "${current}" >"${state}"
 if [[ "${baseline}" == "true" ]]; then
