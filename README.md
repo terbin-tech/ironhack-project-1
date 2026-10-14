@@ -1,155 +1,105 @@
-<!-- © 2024 | Ironhack -->
+# Voting app on AWS with Terraform and Ansible
 
----
+A polyglot voting app (Python vote, Node result, .NET worker, Redis, Postgres) deployed to three EC2 instances. Terraform builds the network and hosts, Ansible installs Docker and runs the containers through a bastion. Forked from [Pokfinner/ironhack-project-1](https://github.com/Pokfinner/ironhack-project-1), itself based on Docker's example voting app.
 
-# Multi-Stack Voting Application
+## Architecture
 
-**Welcome to your DevOps practice project!** This repository hosts a multi-stack voting application composed of several services, each implemented in a different language and technology stack. The goal is to help you gain experience with containerization, orchestration, and running a distributed set of services—both individually and as part of a unified system.
-
-This application, while simple, uses multiple components commonly found in modern distributed architectures, giving you hands-on practice in connecting services, handling containers, and working with basic infrastructure automation.
-
-## Application Overview
-
-The voting application includes:
-
-- **Vote (Python)**: A Python Flask-based web application where users can vote between two options.
-- **Redis (in-memory queue)**: Collects incoming votes and temporarily stores them.
-- **Worker (.NET)**: A .NET 7.0-based service that consumes votes from Redis and persists them into a database.
-- **Postgres (Database)**: Stores votes for long-term persistence.
-- **Result (Node.js)**: A Node.js/Express web application that displays the vote counts in real time.
-
-### Why This Setup?
-
-The goal is to introduce you to a variety of languages, tools, and frameworks in one place. This is **not** a perfect production design. Instead, it’s intentionally diverse to help you:
-
-- Work with multiple runtimes and languages (Python, Node.js, .NET).
-- Interact with services like Redis and Postgres.
-- Containerize applications using Docker.
-- Use Docker Compose to orchestrate and manage multiple services together.
-
-By dealing with this “messy” environment, you’ll build real-world problem-solving skills. After this project, you should feel more confident tackling more complex deployments and troubleshooting issues in containerized, multi-service setups.
-
----
-
-## How to Run Each Component
-
-### Running the Vote Service (Python) Locally (No Docker)
-
-1. Ensure you have Python 3.10+ installed.
-2. Navigate to the `vote` directory:
-   ```bash
-   cd vote
-   pip install -r requirements.txt
-   python app.py
-   ```
-   Access the vote interface at [http://localhost:5000](http://localhost:5000).
-
-### Running Redis Locally (No Docker)
-
-1. Install Redis on your system ([https://redis.io/docs/getting-started/](https://redis.io/docs/getting-started/)).
-2. Start Redis:
-   ```bash
-   redis-server
-   ```
-   Redis will be available at `localhost:6379`.
-
-### Running the Worker (C#/.NET) Locally (No Docker)
-
-1. Ensure .NET 7.0 SDK is installed.
-2. Navigate to `worker`:
-   ```bash
-   cd worker
-   dotnet restore
-   dotnet run
-   ```
-   The worker will attempt to connect to Redis and Postgres when available.
-
-### Running Postgres Locally (No Docker)
-
-1. Install Postgres from [https://www.postgresql.org/download/](https://www.postgresql.org/download/).
-2. Start Postgres, note the username and password (default `postgres`/`postgres`):
-   ```bash
-   # On many systems, Postgres runs as a service once installed.
-   ```
-   Postgres will be available at `localhost:5432`.
-
-### Running the Result Service (Node.js) Locally (No Docker)
-
-1. Ensure Node.js 18+ is installed.
-2. Navigate to `result`:
-   ```bash
-   cd result
-   npm install
-   node server.js
-   ```
-   Access the results interface at [http://localhost:4000](http://localhost:4000).
-
-**Note:** To get the entire system working end-to-end (i.e., votes flowing through Redis, processed by the worker, stored in Postgres, and displayed by the result app), you’ll need to ensure each component is running and that connection strings or environment variables point to the correct services.
-
----
-
-## Running the Entire Stack in Docker
-
-### Building and Running Individual Services
-
-You can build each service with Docker and run them individually:
-
-- **Vote (Python)**:
-  ```bash
-  docker build -t myorg/vote:latest ./vote
-  docker run --name vote -p 8080:80 myorg/vote:latest
-  ```
-  Visit [http://localhost:8080](http://localhost:8080).
-
-- **Redis** (official image, no build needed):
-  ```bash
-  docker run --name redis -p 6379:6379 redis:alpine
-  ```
-
-- **Worker (.NET)**:
-  ```bash
-  docker build -t myorg/worker:latest ./worker
-  docker run --name worker myorg/worker:latest
-  ```
-  
-- **Postgres**:
-  ```bash
-  docker run --name db -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:15-alpine
-  ```
-
-- **Result (Node.js)**:
-  ```bash
-  docker build -t myorg/result:latest ./result
-  docker run --name result -p 8081:80 myorg/result:latest
-  ```
-  Visit [http://localhost:8081](http://localhost:8081).
-
-### Using Docker Compose
-
-The easiest way to run the entire stack is via Docker Compose. From the project root directory:
-
-```bash
-docker compose up
+```mermaid
+flowchart LR
+  user((Browser)) -->|":80 vote, :8080 result"| A
+  admin((Admin)) -->|SSH from one IP| A
+  subgraph VPC["VPC 10.0.0.0/16, one AZ"]
+    subgraph pub["Public subnet 10.0.1.0/24"]
+      A["A: frontend and bastion<br/>vote, result"]
+      NAT[NAT gateway]
+    end
+    subgraph be["Private subnet 10.0.2.0/24"]
+      B["B: backend<br/>redis, worker"]
+    end
+    subgraph dbs["Private subnet 10.0.3.0/24"]
+      C["C: database<br/>postgres"]
+    end
+  end
+  A -->|"6379"| B
+  B -->|"5432"| C
+  A -->|"5432"| C
+  B --> NAT
+  C --> NAT
 ```
 
-This will:
+| Host | Subnet | Containers | Accepts |
+|---|---|---|---|
+| A frontend (bastion) | public | vote (80), result (8080) | 80 and 8080 from anywhere, SSH from the admin IP |
+| B backend | private | redis (6379), worker | 6379 and SSH from A only |
+| C database | private | postgres (5432) | 5432 from A and B, SSH from A only |
 
-- Build and run the vote, worker, and result services.
-- Run Redis and Postgres from their official images.
-- Set up networks, volumes, and environment variables so all services can communicate.
+Images: `nitramabuar/vote`, `nitramabuar/result`, `nitramabuar/worker` on Docker Hub. A fork that changes `vote/`, `result/` or `worker/` builds and pushes its own images, then sets its Docker Hub user as `dockerhub_user` in `ansible/group_vars/all/vars.yml` and exports `DOCKERHUB_USER` for compose. Otherwise it runs the public images above.
 
-Visit [http://localhost:8080](http://localhost:8080) to vote and [http://localhost:8081](http://localhost:8081) to see results.
-
----
-
-## Notes on Platforms (arm64 vs amd64)
-
-If you’re on an arm64 machine (e.g., Apple Silicon M1/M2) and encounter issues with images or dependencies that assume amd64, you can use Docker `buildx`:
+## Run it locally
 
 ```bash
-docker buildx build --platform linux/amd64 -t myorg/worker:latest ./worker
+export DOCKERHUB_USER=your-user   # optional, defaults to nitramabuar
+docker compose up -d --wait
+# vote: http://localhost:8080  result: http://localhost:8081
+docker compose down -v
 ```
 
-This ensures the image is built for the desired platform.
+## Checks
 
----
+`scripts/check.sh` runs every check: `terraform fmt` and `terraform validate`, TFLint with the AWS ruleset, Checkov (Terraform, Ansible, the Dockerfiles, the workflow and committed secrets), ansible-lint, ShellCheck, hadolint and actionlint. It reports every failure in one run and exits non-zero if any check failed. GitHub Actions runs the same script on every push and pull request (`.github/workflows/checks.yml`). The workflow pins the versions of Terraform, TFLint, Checkov, ansible-lint, hadolint and actionlint, takes ShellCheck from the runner image, and locks its actions with GitHub's workflow lockfile. GitHub runs no workflows on a fork until you enable them in its Actions tab.
+
+```bash
+tflint --init   # once, fetches the TFLint AWS ruleset
+scripts/check.sh
+```
+
+An accepted finding carries its reason in a `checkov:skip` or `hadolint ignore` comment next to the code.
+
+## Deploy to AWS
+
+Requirements: Terraform 1.11 or newer, Ansible (ansible-core 2.17 or newer), `ssh-keygen` and `openssl` for step 0, and AWS credentials that can manage S3, VPC and EC2 and read the SSM parameter that holds the Ubuntu AMI (`ssm:GetParameter`). The stack bills by the hour while it is up (the NAT gateway and the three instances), so tear it down when you are done.
+
+To use your own names, set `owner`, `name_prefix` and, if you want, `region` in both modules: in `infra/main/terraform.tfvars`, and for `infra/bootstrap`, which has no tfvars example, with `-var` or a `terraform.tfvars` of your own. The course account only allows `us-east-1` and `eu-central-1`, so no other region passes validation.
+
+A fresh fork needs its own key and vault, because the tracked `ansible/group_vars/all/vault.yml` is encrypted with the original owner's password. The database password must be hex: the result app puts it unencoded in a `postgresql://` URL and the worker in a `;` separated connection string.
+
+```bash
+# 0. Your own SSH key and vault (once)
+ssh-keygen -t ed25519 -N '' -f ~/.ssh/ironhack-project-1
+mkdir -p ~/.ansible && (umask 077 && openssl rand -hex 32 > ~/.ansible/ironhack-project-1.vault-pass)
+printf 'vault_db_password: "%s"\n' "$(openssl rand -hex 16)" > ansible/group_vars/all/vault.yml
+ansible-vault encrypt --vault-password-file ~/.ansible/ironhack-project-1.vault-pass ansible/group_vars/all/vault.yml
+
+# 1. State bucket (once)
+cd infra/bootstrap && terraform init && terraform apply   # also writes infra/main/backend.hcl
+
+# 2. Network and hosts
+cd ../main
+cp terraform.tfvars.example terraform.tfvars   # then set admin_cidr to your public IPv4 as a /32, e.g. 203.0.113.7/32
+terraform init -backend-config=backend.hcl && terraform apply
+
+# 3. Containers
+cd ../..
+ansible-galaxy collection install -r ansible/requirements.yml
+ansible-playbook -i ansible/inventory.ini --vault-password-file ~/.ansible/ironhack-project-1.vault-pass ansible/site.yml
+ansible-playbook -i ansible/inventory.ini --vault-password-file ~/.ansible/ironhack-project-1.vault-pass ansible/smoke.yml
+```
+
+`terraform -chdir=infra/main output` prints the vote and result URLs.
+
+## Design notes
+
+- Remote state lives in S3 with S3 native locking (`use_lockfile`). Terraform has deprecated DynamoDB based locking.
+- Security groups chain tier to tier: Redis only accepts the frontend, Postgres only the frontend and backend, and SSH to private hosts only comes through the bastion. Terraform removes the allow-all egress rule AWS adds to new security groups, so every outbound flow is declared.
+- Ansible reaches the private hosts with `ProxyJump` through the frontend, using an `ssh_config` that Terraform generates. There is no `ansible.cfg`, because Ansible ignores one in a world-writable directory (as on a WSL checkout of a Windows drive); the SSH settings live in `group_vars`.
+- Docker is installed from Docker's own apt repository rather than Ubuntu's `docker.io` package.
+- The Postgres password is kept in Ansible Vault. Redis has no password (the vote app cannot send one), so its security group is its only protection.
+- HTTPS is out of scope: there is no domain or certificate.
+- The root volumes are encrypted, and every app container runs as an unprivileged user.
+
+## Tear down
+
+```bash
+cd infra/main && terraform destroy
+cd ../bootstrap && terraform destroy
+```
