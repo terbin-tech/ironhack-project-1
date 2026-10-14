@@ -1,4 +1,4 @@
-# One AZ: public subnet for the frontend/bastion and the NAT gateway,
+# One AZ: public subnet for the frontend, the bastion and the NAT gateway,
 # one private subnet each for the backend and the database.
 
 data "aws_availability_zones" "available" {
