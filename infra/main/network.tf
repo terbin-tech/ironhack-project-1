@@ -85,8 +85,8 @@ resource "aws_eip" "nat" {
   depends_on = [aws_internet_gateway.this]
 }
 
-# Zonal NAT: a new regional NAT can take up to an hour to start serving an AZ,
-# which would leave the private hosts without egress on the first Ansible run.
+# Zonal NAT: this VPC has one AZ and a public subnet anyway, so the benefits
+# of a regional NAT (several AZs, no public subnet) would not apply here.
 resource "aws_nat_gateway" "this" {
   allocation_id = aws_eip.nat.id
   subnet_id     = aws_subnet.public.id
