@@ -1,16 +1,17 @@
 # Voting app on AWS with Terraform and Ansible
 
-A polyglot voting app (Python vote, Node result, .NET worker, Redis, Postgres) deployed to three EC2 instances. Terraform builds the network and hosts, Ansible installs Docker and runs the containers through a bastion. Forked from [Pokfinner/ironhack-project-1](https://github.com/Pokfinner/ironhack-project-1), itself based on Docker's example voting app.
+A polyglot voting app (Python vote, Node result, .NET worker, Redis, Postgres) deployed to three EC2 instances behind a dedicated bastion host. Terraform builds the network and hosts, Ansible installs Docker and runs the containers through the bastion. Forked from [Pokfinner/ironhack-project-1](https://github.com/Pokfinner/ironhack-project-1), itself based on Docker's example voting app.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
   user((Browser)) -->|":80 vote, :8080 result"| A
-  admin((Admin)) -->|SSH from one IP| A
+  admin((Admin)) -->|SSH from one IP| BA
   subgraph VPC["VPC 10.0.0.0/16, one AZ"]
     subgraph pub["Public subnet 10.0.1.0/24"]
-      A["A: frontend and bastion<br/>vote, result"]
+      BA["Bastion<br/>SSH entry only"]
+      A["A: frontend<br/>vote, result"]
       NAT[NAT gateway]
     end
     subgraph be["Private subnet 10.0.2.0/24"]
@@ -20,6 +21,9 @@ flowchart LR
       C["C: database<br/>postgres"]
     end
   end
+  BA -.->|SSH| A
+  BA -.->|SSH| B
+  BA -.->|SSH| C
   A -->|"6379"| B
   B -->|"5432"| C
   A -->|"5432"| C
@@ -29,9 +33,10 @@ flowchart LR
 
 | Host | Subnet | Containers | Accepts |
 |---|---|---|---|
-| A frontend (bastion) | public | vote (80), result (8080) | 80 and 8080 from anywhere, SSH from the admin IP |
-| B backend | private | redis (6379), worker | 6379 and SSH from A only |
-| C database | private | postgres (5432) | 5432 from A and B, SSH from A only |
+| Bastion | public | none | SSH from the admin IP only |
+| A frontend | public | vote (80), result (8080) | 80 and 8080 from anywhere, SSH from the bastion only |
+| B backend | private | redis (6379), worker | 6379 from A, SSH from the bastion only |
+| C database | private | postgres (5432) | 5432 from A and B, SSH from the bastion only |
 
 Images: `nitramabuar/vote`, `nitramabuar/result`, `nitramabuar/worker` on Docker Hub. A fork that changes `vote/`, `result/` or `worker/` builds and pushes its own images, then sets its Docker Hub user as `dockerhub_user` in `ansible/group_vars/all/vars.yml` and exports `DOCKERHUB_USER` for compose. Otherwise it runs the public images above.
 
@@ -57,7 +62,7 @@ An accepted finding carries its reason in a `checkov:skip` or `hadolint ignore` 
 
 ## Deploy to AWS
 
-Requirements: Terraform 1.11 or newer, Ansible (ansible-core 2.17 or newer), `ssh-keygen` and `openssl` for step 0, and AWS credentials that can manage S3, VPC and EC2 and read the SSM parameter that holds the Ubuntu AMI (`ssm:GetParameter`). The stack bills by the hour while it is up (the NAT gateway and the three instances), so tear it down when you are done.
+Requirements: Terraform 1.11 or newer, Ansible (ansible-core 2.17 or newer), `ssh-keygen` and `openssl` for step 0, and AWS credentials that can manage S3, VPC and EC2 and read the SSM parameter that holds the Ubuntu AMI (`ssm:GetParameter`). The stack bills by the hour while it is up (the NAT gateway and the four instances), so tear it down when you are done.
 
 To use your own names, set `owner`, `name_prefix` and, if you want, `region` in both modules: in `infra/main/terraform.tfvars`, and for `infra/bootstrap`, which has no tfvars example, with `-var` or a `terraform.tfvars` of your own. The course account only allows `us-east-1` and `eu-central-1`, so no other region passes validation.
 
@@ -90,8 +95,9 @@ ansible-playbook -i ansible/inventory.ini --vault-password-file ~/.ansible/ironh
 ## Design notes
 
 - Remote state lives in S3 with S3 native locking (`use_lockfile`). Terraform has deprecated DynamoDB based locking.
-- Security groups chain tier to tier: Redis only accepts the frontend, Postgres only the frontend and backend, and SSH to private hosts only comes through the bastion. Terraform removes the allow-all egress rule AWS adds to new security groups, so every outbound flow is declared.
-- Ansible reaches the private hosts with `ProxyJump` through the frontend, using an `ssh_config` that Terraform generates. There is no `ansible.cfg`, because Ansible ignores one in a world-writable directory (as on a WSL checkout of a Windows drive); the SSH settings live in `group_vars`.
+- Security groups chain tier to tier: Redis only accepts the frontend, Postgres only the frontend and backend, and every host accepts SSH only from the bastion, which accepts it only from the admin IP. Terraform removes the allow-all egress rule AWS adds to new security groups, so every outbound flow is declared.
+- Ansible reaches every host with `ProxyJump` through the bastion, using an `ssh_config` that Terraform generates. Ansible runs on the admin's machine, so neither the SSH key nor any secret is stored on the internet-facing bastion. There is no `ansible.cfg`, because Ansible ignores one in a world-writable directory (as on a WSL checkout of a Windows drive); the SSH settings live in `ansible/inventory.ini`, so they apply only with this inventory.
+- AWS documents ways to reach private hosts without any bastion: Session Manager ("secure node management without the need to open inbound ports, maintain bastion hosts, or manage SSH keys") and EC2 Instance Connect Endpoint. This project uses a bastion because the course asks for one.
 - Docker is installed from Docker's own apt repository rather than Ubuntu's `docker.io` package.
 - The Postgres password is kept in Ansible Vault and never written to a log: result and the worker log the host, user and database only. Redis has no password (the vote app cannot send one), so its security group is its only protection.
 - Votes survive a database restart: the worker moves each vote from `votes` to a `votes:processing` list in Redis and removes it only after Postgres has stored it, the pattern the Redis `LMOVE` docs describe for a reliable queue. Votes that cannot be read or that Postgres refuses land in `votes:failed`. result polls through its connection pool, so it recovers on its own.
