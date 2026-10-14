@@ -1,0 +1,64 @@
+# Runs scripts/check.sh, the same checks as on a laptop, on every push and pull request.
+name: checks
+
+on:
+  push:
+  pull_request:
+
+# Read-only token: nothing in this workflow writes to the repository.
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    # Pinned so the preinstalled tools do not change when ubuntu-latest moves.
+    runs-on: ubuntu-26.04
+    env:
+      HADOLINT_VERSION: 2.15.1
+      HADOLINT_SHA256: c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507
+      ACTIONLINT_VERSION: 1.7.12
+      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_version: 1.16.6
+          terraform_wrapper: false
+
+      - uses: terraform-linters/setup-tflint@v6.3.2
+        with:
+          tflint_version: v0.64.0
+
+      - name: Install the TFLint AWS ruleset
+        run: tflint --init --config "$PWD/.tflint.hcl"
+        env:
+          # Authenticated release lookups avoid the shared anonymous rate limit.
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - uses: astral-sh/setup-uv@v10.3.0
+
+      - name: Install Checkov and ansible-lint
+        run: |
+          uv tool install --python 3.14 checkov==3.3.29
+          uv tool install --python 3.14 ansible-lint==26.10.1 --with ansible-core==2.21.5
+
+      - name: Install hadolint and actionlint
+        run: |
+          bin="$HOME/.local/bin"
+          mkdir -p "$bin"
+          hadolint_url="https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}"
+          curl -fsSLo "$RUNNER_TEMP/hadolint" "$hadolint_url/hadolint-linux-x86_64"
+          echo "${HADOLINT_SHA256}  $RUNNER_TEMP/hadolint" | sha256sum -c -
+          install -m 0755 "$RUNNER_TEMP/hadolint" "$bin/hadolint"
+          actionlint_url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          actionlint_tar="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSLo "$RUNNER_TEMP/$actionlint_tar" "$actionlint_url/$actionlint_tar"
+          echo "${ACTIONLINT_SHA256}  $RUNNER_TEMP/$actionlint_tar" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$actionlint_tar" -C "$bin" actionlint
+          echo "$bin" >> "$GITHUB_PATH"
+
+      - name: Run every check
+        run: scripts/check.sh
