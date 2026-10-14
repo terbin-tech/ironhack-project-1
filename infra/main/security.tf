@@ -3,20 +3,21 @@
 # Security groups do not filter DNS, instance metadata or Amazon Time Sync.
 
 locals {
-  tiers = toset(["frontend", "backend", "db"])
+  tiers = toset(["bastion", "frontend", "backend", "db"])
 
   ingress_rules = {
+    bastion_ssh        = { sg = "bastion", port = 22, cidr = var.admin_cidr, peer = null, desc = "SSH from the admin only" }
     frontend_vote      = { sg = "frontend", port = 80, cidr = "0.0.0.0/0", peer = null, desc = "vote from the internet" }
     frontend_result    = { sg = "frontend", port = 8080, cidr = "0.0.0.0/0", peer = null, desc = "result from the internet" }
-    frontend_ssh       = { sg = "frontend", port = 22, cidr = var.admin_cidr, peer = null, desc = "SSH from the admin only" }
+    frontend_ssh       = { sg = "frontend", port = 22, cidr = null, peer = "bastion", desc = "SSH through the bastion" }
     backend_redis      = { sg = "backend", port = 6379, cidr = null, peer = "frontend", desc = "Redis from vote" }
-    backend_ssh        = { sg = "backend", port = 22, cidr = null, peer = "frontend", desc = "SSH through the bastion" }
+    backend_ssh        = { sg = "backend", port = 22, cidr = null, peer = "bastion", desc = "SSH through the bastion" }
     db_postgres_worker = { sg = "db", port = 5432, cidr = null, peer = "backend", desc = "Postgres from worker" }
     db_postgres_result = { sg = "db", port = 5432, cidr = null, peer = "frontend", desc = "Postgres from result" }
-    db_ssh             = { sg = "db", port = 22, cidr = null, peer = "frontend", desc = "SSH through the bastion" }
+    db_ssh             = { sg = "db", port = 22, cidr = null, peer = "bastion", desc = "SSH through the bastion" }
   }
 
-  # Every tier needs apt and Docker Hub.
+  # Every tier needs apt and Docker Hub; the bastion needs apt for updates.
   web_egress_rules = merge([
     for tier in local.tiers : {
       "${tier}_http"  = { sg = tier, port = 80, cidr = "0.0.0.0/0", peer = null, desc = "apt and image pulls" }
@@ -25,8 +26,9 @@ locals {
   ]...)
 
   egress_rules = merge(local.web_egress_rules, {
-    frontend_ssh_backend = { sg = "frontend", port = 22, cidr = null, peer = "backend", desc = "bastion hop to backend" }
-    frontend_ssh_db      = { sg = "frontend", port = 22, cidr = null, peer = "db", desc = "bastion hop to db" }
+    bastion_ssh_frontend = { sg = "bastion", port = 22, cidr = null, peer = "frontend", desc = "bastion hop to frontend" }
+    bastion_ssh_backend  = { sg = "bastion", port = 22, cidr = null, peer = "backend", desc = "bastion hop to backend" }
+    bastion_ssh_db       = { sg = "bastion", port = 22, cidr = null, peer = "db", desc = "bastion hop to db" }
     frontend_redis       = { sg = "frontend", port = 6379, cidr = null, peer = "backend", desc = "vote to Redis" }
     frontend_postgres    = { sg = "frontend", port = 5432, cidr = null, peer = "db", desc = "result to Postgres" }
     backend_postgres     = { sg = "backend", port = 5432, cidr = null, peer = "db", desc = "worker to Postgres" }

@@ -1,6 +1,6 @@
 ---
-- name: Install Docker on every host
-  hosts: all
+- name: Install Docker on every host but the bastion
+  hosts: all:!bastion
   become: true
   roles:
     - docker

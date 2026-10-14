@@ -2,7 +2,7 @@
 # End to end: a vote cast on the frontend travels through Redis and the worker into Postgres.
 
 - name: Gather every host's facts for the private IPs
-  hosts: all
+  hosts: all:!bastion
   gather_facts: true
   tasks: []
 

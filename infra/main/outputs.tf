@@ -1,5 +1,10 @@
+output "bastion_public_ip" {
+  description = "Public IP of the bastion, the only host that accepts SSH from the admin."
+  value       = aws_instance.this["bastion"].public_ip
+}
+
 output "frontend_public_ip" {
-  description = "Public IP of instance A (vote, result, bastion)."
+  description = "Public IP of instance A (vote, result)."
   value       = aws_instance.this["frontend"].public_ip
 }
 
