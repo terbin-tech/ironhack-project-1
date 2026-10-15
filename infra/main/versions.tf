@@ -10,6 +10,11 @@ terraform {
       source  = "hashicorp/local"
       version = "~> 2.9"
     }
+    # 3.7 is the first release with the ephemeral random_password.
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.7"
+    }
   }
 
   # bucket and region come from backend.hcl, written by infra/bootstrap:
