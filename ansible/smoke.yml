@@ -16,8 +16,7 @@
     # vote uses the voter_id cookie as the voter id and the worker stores it in votes.id.
     - name: Cast a vote
       ansible.builtin.uri:
-        # checkov:skip=CKV2_ANSIBLE_1:app_url is the https:// URL infra/main writes; Checkov cannot read the variable
-        url: "{{ app_url }}"
+        url: "https://{{ app_url | urlsplit('hostname') }}/"
         method: POST
         body_format: form-urlencoded
         body:
@@ -43,8 +42,7 @@
 
     - name: The result page answers
       ansible.builtin.uri:
-        # checkov:skip=CKV2_ANSIBLE_1:app_url is the https:// URL infra/main writes; Checkov cannot read the variable
-        url: "{{ app_url }}result/"
+        url: "https://{{ app_url | urlsplit('hostname') }}/result/"
 
     - name: Report
       ansible.builtin.debug:

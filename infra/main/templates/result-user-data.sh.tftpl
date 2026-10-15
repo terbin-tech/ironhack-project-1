@@ -13,6 +13,7 @@ env_file=/run/result.env
 # here is awslogs, which would ship it to CloudWatch). The CLI does not take its
 # region from instance metadata, so it is passed.
 umask 077
+trap 'rm -f "$env_file"' EXIT
 until password=$(aws ssm get-parameter --region '${region}' --name '${password_param}' \
   --with-decryption --query Parameter.Value --output text); do
   sleep 10
@@ -28,4 +29,3 @@ docker run -d --name result --restart unless-stopped -p 80:80 \
   --env-file "$env_file" \
   -e PG_HOST='${db_host}' -e PG_USER='${db_user}' -e PG_DATABASE='${db_name}' \
   "$image"
-rm -f "$env_file"
