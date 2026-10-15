@@ -127,6 +127,8 @@ resource "aws_nat_gateway" "this" {
 
   depends_on = [aws_internet_gateway.this]
 
+  # A replacement gateway exists before the old one goes, so the private
+  # hosts never lose their route.
   lifecycle {
     create_before_destroy = true
   }
