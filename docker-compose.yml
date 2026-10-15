@@ -1,5 +1,5 @@
 # Local run of the whole stack with our published images.
-# The password below is for local use only; the AWS deployment takes it from Ansible Vault.
+# The password below is for local use only; the AWS deployment takes it from SSM Parameter Store.
 
 services:
   vote:
