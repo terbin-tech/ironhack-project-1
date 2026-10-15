@@ -52,3 +52,14 @@ variable "alarm_email" {
     error_message = "alarm_email must be an email address, e.g. you@example.com."
   }
 }
+
+variable "domain_zone" {
+  description = "Public Route 53 hosted zone, in this AWS account, that holds the app's name."
+  type        = string
+}
+
+variable "app_hostname" {
+  description = "Host name under domain_zone where the load balancer serves the app over HTTPS."
+  type        = string
+  default     = "voting"
+}

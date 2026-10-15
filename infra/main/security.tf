@@ -3,7 +3,10 @@
 # Security groups do not filter DNS, instance metadata or Amazon Time Sync.
 
 locals {
-  tiers = toset(["bastion", "frontend", "backend", "db"])
+  tiers = toset(["bastion", "frontend", "backend", "db", "alb"])
+
+  # Every tier but the load balancer needs apt, Docker Hub and the AWS APIs.
+  host_tiers = setsubtract(local.tiers, ["alb"])
 
   ingress_rules = {
     bastion_ssh        = { sg = "bastion", port = 22, cidr = var.admin_cidr, peer = null, desc = "SSH from the admin only" }
@@ -15,11 +18,13 @@ locals {
     db_postgres_worker = { sg = "db", port = 5432, cidr = null, peer = "backend", desc = "Postgres from worker" }
     db_postgres_result = { sg = "db", port = 5432, cidr = null, peer = "frontend", desc = "Postgres from result" }
     db_ssh             = { sg = "db", port = 22, cidr = null, peer = "bastion", desc = "SSH through the bastion" }
+    alb_http           = { sg = "alb", port = 80, cidr = "0.0.0.0/0", peer = null, desc = "HTTP from the internet, redirected to HTTPS" }
+    alb_https          = { sg = "alb", port = 443, cidr = "0.0.0.0/0", peer = null, desc = "HTTPS from the internet" }
   }
 
-  # Every tier needs apt and Docker Hub; the bastion needs apt for updates.
+  # Every host tier needs apt and Docker Hub.
   web_egress_rules = merge([
-    for tier in local.tiers : {
+    for tier in local.host_tiers : {
       "${tier}_http"  = { sg = tier, port = 80, cidr = "0.0.0.0/0", peer = null, desc = "apt and image pulls" }
       "${tier}_https" = { sg = tier, port = 443, cidr = "0.0.0.0/0", peer = null, desc = "apt and image pulls" }
     }
@@ -38,7 +43,7 @@ locals {
 resource "aws_security_group" "this" {
   for_each = local.tiers
 
-  #checkov:skip=CKV2_AWS_5:false positive; each group is attached through aws_instance.this[each.key]
+  #checkov:skip=CKV2_AWS_5:false positive; groups are attached through aws_instance.this, the launch templates and the load balancer
 
   name        = "${var.name_prefix}${each.key}-sg"
   description = "${each.key} tier of the voting app"
@@ -52,7 +57,7 @@ resource "aws_security_group" "this" {
 resource "aws_vpc_security_group_ingress_rule" "this" {
   for_each = local.ingress_rules
 
-  #checkov:skip=CKV_AWS_260:the vote page is public on port 80 by design; the load balancer add-on revisits this
+  #checkov:skip=CKV_AWS_260:the load balancer takes HTTP from the internet only to redirect it to HTTPS
 
   security_group_id            = aws_security_group.this[each.value.sg].id
   description                  = each.value.desc

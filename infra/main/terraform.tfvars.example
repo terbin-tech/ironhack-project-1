@@ -5,3 +5,7 @@ admin_cidr = "192.0.2.10/32"
 
 # CloudWatch alarms email this address; confirm the link AWS sends after the first apply.
 alarm_email = "you@example.com"
+
+# A public Route 53 hosted zone in your AWS account; the app is served at
+# https://<app_hostname>.<domain_zone>/ (app_hostname defaults to "voting").
+domain_zone = "example.com"
