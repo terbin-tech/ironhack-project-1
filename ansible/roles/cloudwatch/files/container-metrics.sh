@@ -21,13 +21,15 @@ else
   baseline=true
 fi
 
+# The format uses index for Health: Docker 29 evaluates it on a map, where a
+# missing Health key (no healthcheck) is an error with .State.Health.
 # Capture docker's output first: a docker error must exit here, before anything
 # is sent or the state file is written, so the alarms see missing data, not zeros.
 ids=$(docker ps --all --quiet)
 info=""
 if [[ -n "${ids}" ]]; then
   info=$(printf '%s\n' "${ids}" | xargs docker inspect --format \
-    '{{.Id}} {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} {{.RestartCount}}')
+    '{{.Id}} {{.State.Status}} {{with index .State "Health"}}{{.Status}}{{else}}none{{end}} {{.RestartCount}}')
 fi
 
 down=0
