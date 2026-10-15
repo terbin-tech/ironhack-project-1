@@ -1,0 +1,26 @@
+---
+# Run by Packer (infra/image/app.pkr.hcl) on a temporary instance; the result
+# is the image the vote and result Auto Scaling groups launch. Packer passes
+# name_prefix and aws_region with -e and brings its own inventory, so nothing
+# from inventory.ini applies here.
+
+- name: Bake Docker, the CloudWatch agent and the AWS CLI into the app image
+  hosts: all
+  become: true
+  roles:
+    - docker
+    - cloudwatch
+    - awscli
+  post_tasks:
+    # The agent keeps per-file read offsets; instances launched from the image
+    # start their own instead of inheriting the build instance's. It stays
+    # enabled, so it starts on every new instance and re-reads its config there.
+    - name: Stop the CloudWatch agent before the image is taken
+      ansible.builtin.service:
+        name: amazon-cloudwatch-agent
+        state: stopped
+
+    - name: Remove the build instance's agent state
+      ansible.builtin.file:
+        path: /opt/aws/amazon-cloudwatch-agent/logs/state
+        state: absent

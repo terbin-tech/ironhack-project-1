@@ -1,0 +1,27 @@
+---
+# AWS CLI v2 with AWS's own installer, as docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
+# describes for Linux x86_64. Ubuntu's awscli package is not maintained by AWS.
+
+- name: Install unzip for the installer
+  ansible.builtin.apt:
+    name: unzip
+    update_cache: true
+    cache_valid_time: 3600
+    lock_timeout: 300
+
+- name: Download and unpack the AWS CLI installer
+  ansible.builtin.unarchive:
+    src: https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
+    dest: /tmp
+    remote_src: true
+    creates: /usr/local/bin/aws
+
+- name: Install the AWS CLI
+  ansible.builtin.command: /tmp/aws/install
+  args:
+    creates: /usr/local/bin/aws
+
+- name: Remove the unpacked installer
+  ansible.builtin.file:
+    path: /tmp/aws
+    state: absent
