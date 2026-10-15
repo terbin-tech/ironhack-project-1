@@ -2,3 +2,6 @@
 collections:
   - name: community.docker
     version: ">=5.0.6"
+  # The ssm_parameter lookup for the database password.
+  - name: amazon.aws
+    version: ">=12.0.0"

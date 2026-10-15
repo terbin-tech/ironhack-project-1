@@ -8,7 +8,9 @@ dockerhub_user: nitramabuar
 # The postgres image creates a database named after its user.
 db_user: postgres
 db_name: postgres
-db_password: "{{ vault_db_password }}"
+# The password lives only in Parameter Store. The lookup runs on the controller with
+# the admin's AWS credentials (boto3 in Ansible's Python), each time a task uses it.
+db_password: "{{ lookup('amazon.aws.ssm_parameter', name_prefix ~ 'db-password', region=aws_region) }}"
 
 # Private IPs from gathered facts; the plays gather them even under --limit.
 backend_ip: "{{ hostvars[groups['backend'][0]]['ansible_facts']['default_ipv4']['address'] }}"
