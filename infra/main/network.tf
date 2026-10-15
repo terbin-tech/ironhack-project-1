@@ -1,5 +1,5 @@
-# Two zones. Public subnets hold the internet-facing hosts and, from the load
-# balancer on, its nodes; the app subnets hold the vote and result groups in
+# Two zones. Public subnets hold the internet-facing hosts and the load
+# balancer nodes; the app subnets hold the vote and result groups in
 # both zones; backend and db stay in zone a. One regional NAT gateway gives
 # every private subnet its egress.
 
@@ -116,8 +116,7 @@ resource "aws_subnet" "db" {
 # each zone's egress when the other zone fails, and needs no public subnet or
 # Elastic IP of its own. In automatic mode it may take up to 60 minutes to
 # expand into a new zone and serves that zone's traffic from another zone
-# meanwhile. Created before the zonal gateway it replaces is deleted, so the
-# private hosts never lose their route.
+# meanwhile.
 resource "aws_nat_gateway" "this" {
   availability_mode = "regional"
   vpc_id            = aws_vpc.this.id

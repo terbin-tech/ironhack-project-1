@@ -73,7 +73,7 @@ An accepted finding carries its reason in a `checkov:skip` or `hadolint ignore` 
 
 ## Deploy to AWS
 
-Requirements: Terraform 1.11 or newer, Packer 1.16 or newer, a public Route 53 hosted zone in the account, Ansible (ansible-core 2.17 or newer, with boto3 in its Python for the Parameter Store lookup, for example from `uv tool install ansible-core --with boto3`), `ssh-keygen` for step 0, and AWS credentials that can manage S3, VPC, EC2, IAM roles and policies, CloudWatch Logs and alarms, SNS, Route 53, ACM, Elastic Load Balancing and Auto Scaling, and read the SSM parameter that holds the Ubuntu AMI and write and read the database password parameter (`ssm:GetParameter`, `ssm:PutParameter`). The stack bills by the hour while it is up (the NAT gateway, the load balancer, the three fixed instances and the app groups), so tear it down when you are done.
+Requirements: Terraform 1.11 or newer, Packer 1.16 or newer, the AWS CLI (v2), a public Route 53 hosted zone in the account, Ansible (ansible-core 2.17 or newer, with boto3 in its Python for the Parameter Store lookup, for example from `uv tool install ansible-core --with boto3`), `ssh-keygen` for step 0, and AWS credentials that can manage S3, VPC, EC2, IAM roles and policies, CloudWatch Logs and alarms, SNS, Route 53, ACM, Elastic Load Balancing and Auto Scaling, and read the SSM parameter that holds the Ubuntu AMI and write and read the database password parameter (`ssm:GetParameter`, `ssm:PutParameter`). The stack bills by the hour while it is up (the NAT gateway, the load balancer, the three fixed instances and the app groups), so tear it down when you are done.
 
 To use your own names, set `owner`, `name_prefix` and, if you want, `region` in both modules: in `infra/main/terraform.tfvars`, and for `infra/bootstrap`, which has no tfvars example, with `-var` or a `terraform.tfvars` of your own. The course account only allows `us-east-1` and `eu-central-1`, so no other region passes validation.
 
@@ -89,7 +89,7 @@ cd infra/bootstrap && terraform init && terraform apply   # also writes infra/ma
 # 1b. App server image (once, and again after a change to the roles). Set name_prefix
 #     and region in infra/image/app.pkr.hcl, or pass them with -var, if you changed
 #     them for infra/main.
-packer init infra/image && packer build infra/image
+packer init ../image && packer build ../image
 
 # 2. Network and hosts
 cd ../main
@@ -107,6 +107,8 @@ ansible-playbook -i ansible/inventory.ini ansible/smoke.yml
 `terraform -chdir=infra/main output` prints `app_url` and `result_url`.
 
 ## Monitoring
+
+The `martin-` names below assume the default `name_prefix`; replace `martin-` with your prefix if you changed it.
 
 - Container logs go to CloudWatch Logs through Docker's `awslogs` log driver, set as the default in `/etc/docker/daemon.json` by the `docker` role: log group `martin-containers`, one stream per container named `<container>/<short id>`. `docker logs` still works.
 - The CloudWatch agent (role `cloudwatch`) sends memory and root disk use, and `/var/log/auth.log` to `martin-ssh`.
@@ -130,7 +132,7 @@ The brief suggests the CloudWatch agent for container logs, but with a wildcard 
 - Ansible reaches every host with `ProxyJump` through the bastion, using an `ssh_config` that Terraform generates. Ansible runs on the admin's machine, so neither the SSH key nor any secret is stored on the internet-facing bastion. There is no `ansible.cfg`, because Ansible ignores one in a world-writable directory (as on a WSL checkout of a Windows drive); the SSH settings live in `ansible/inventory.ini`, so they apply only with this inventory.
 - AWS documents ways to reach private hosts without any bastion: Session Manager ("secure node management without the need to open inbound ports, maintain bastion hosts, or manage SSH keys") and EC2 Instance Connect Endpoint. This project uses a bastion because the course asks for one.
 - Docker is installed from Docker's own apt repository rather than Ubuntu's `docker.io` package.
-- The Postgres password lives only in SSM Parameter Store as a SecureString and is never written to a log: result and the worker log the host, user and database only. Terraform writes it with a write-only argument, so it is never stored in the state, and Ansible reads it at run time. To rotate it, bump `db_password_version` in `infra/main/secrets.tf` and apply, set the new value in Postgres with `ALTER USER` (sent on stdin, never on a command line), then rerun `site.yml`; from stage 4 on, the result group also needs an instance refresh, because its instances read the password once at boot. Change any other setting of the parameter only together with a version bump: the provider resends the value only when the version changes. Redis has no password (the vote app cannot send one), so its security group is its only protection.
+- The Postgres password lives only in SSM Parameter Store as a SecureString and is never written to a log: result and the worker log the host, user and database only. Terraform writes it with a write-only argument, so it is never stored in the state, and Ansible reads it at run time. To rotate it, bump `db_password_version` in `infra/main/secrets.tf` and apply, set the new value in Postgres with `ALTER USER` (sent on stdin, never on a command line), then rerun `site.yml`; the result group also needs an instance refresh, because its instances read the password once at boot. Change any other setting of the parameter only together with a version bump: the provider resends the value only when the version changes. Redis has no password (the vote app cannot send one), so its security group is its only protection.
 - Votes survive a database restart: the worker moves each vote from `votes` to a `votes:processing` list in Redis and removes it only after Postgres has stored it, the pattern the Redis `LMOVE` docs describe for a reliable queue. Votes that cannot be read or that Postgres refuses land in `votes:failed`. result polls through its connection pool, so it recovers on its own.
 - The root volumes are encrypted, and every app container runs as an unprivileged user.
 
