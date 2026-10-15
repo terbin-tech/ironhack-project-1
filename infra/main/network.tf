@@ -1,18 +1,33 @@
-# One AZ: public subnet for the frontend, the bastion and the NAT gateway,
-# one private subnet each for the backend and the database.
+# Two zones. Public subnets hold the internet-facing hosts and, from the load
+# balancer on, its nodes; the app subnets hold the vote and result groups in
+# both zones; backend and db stay in zone a. One regional NAT gateway gives
+# every private subnet its egress.
 
 data "aws_availability_zones" "available" {
   state = "available"
 
-  # Pin the zone by name, so a zone AWS adds later can never change the one used.
+  # Pin the zones by name, so a zone AWS adds later can never change the ones used.
   filter {
     name   = "zone-name"
-    values = ["${var.region}a"]
+    values = ["${var.region}a", "${var.region}b"]
+  }
+
+  lifecycle {
+    postcondition {
+      condition     = length(self.names) == 2
+      error_message = "Zones ${var.region}a and ${var.region}b must both be available."
+    }
   }
 }
 
 locals {
-  az = data.aws_availability_zones.available.names[0]
+  # { a = "us-east-1a", b = "us-east-1b" }
+  zones = { for name in data.aws_availability_zones.available.names : trimprefix(name, var.region) => name }
+
+  app_subnets = {
+    a = "10.0.11.0/24"
+    b = "10.0.12.0/24"
+  }
 }
 
 resource "aws_vpc" "this" {
@@ -43,20 +58,44 @@ resource "aws_internet_gateway" "this" {
   }
 }
 
+# Zone a keeps its original address, so nothing that sits in it is replaced.
 resource "aws_subnet" "public" {
   vpc_id            = aws_vpc.this.id
   cidr_block        = "10.0.1.0/24"
-  availability_zone = local.az
+  availability_zone = local.zones["a"]
 
   tags = {
-    Name = "${var.name_prefix}public"
+    Name = "${var.name_prefix}public-a"
+  }
+}
+
+# An ALB needs subnets in at least two zones.
+resource "aws_subnet" "public_b" {
+  vpc_id            = aws_vpc.this.id
+  cidr_block        = "10.0.4.0/24"
+  availability_zone = local.zones["b"]
+
+  tags = {
+    Name = "${var.name_prefix}public-b"
+  }
+}
+
+resource "aws_subnet" "app" {
+  for_each = local.app_subnets
+
+  vpc_id            = aws_vpc.this.id
+  cidr_block        = each.value
+  availability_zone = local.zones[each.key]
+
+  tags = {
+    Name = "${var.name_prefix}app-${each.key}"
   }
 }
 
 resource "aws_subnet" "backend" {
   vpc_id            = aws_vpc.this.id
   cidr_block        = "10.0.2.0/24"
-  availability_zone = local.az
+  availability_zone = local.zones["a"]
 
   tags = {
     Name = "${var.name_prefix}backend"
@@ -66,34 +105,32 @@ resource "aws_subnet" "backend" {
 resource "aws_subnet" "db" {
   vpc_id            = aws_vpc.this.id
   cidr_block        = "10.0.3.0/24"
-  availability_zone = local.az
+  availability_zone = local.zones["a"]
 
   tags = {
     Name = "${var.name_prefix}db"
   }
 }
 
-resource "aws_eip" "nat" {
-  domain = "vpc"
-
-  tags = {
-    Name = "${var.name_prefix}nat"
-  }
-
-  depends_on = [aws_internet_gateway.this]
-}
-
-# Zonal NAT: this VPC has one AZ and a public subnet anyway, so the benefits
-# of a regional NAT (several AZs, no public subnet) would not apply here.
+# Regional NAT: with private subnets in two zones, one regional gateway keeps
+# each zone's egress when the other zone fails, and needs no public subnet or
+# Elastic IP of its own. In automatic mode it may take up to 60 minutes to
+# expand into a new zone and serves that zone's traffic from another zone
+# meanwhile. Created before the zonal gateway it replaces is deleted, so the
+# private hosts never lose their route.
 resource "aws_nat_gateway" "this" {
-  allocation_id = aws_eip.nat.id
-  subnet_id     = aws_subnet.public.id
+  availability_mode = "regional"
+  vpc_id            = aws_vpc.this.id
 
   tags = {
     Name = "${var.name_prefix}nat"
   }
 
   depends_on = [aws_internet_gateway.this]
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_route_table" "public" {
@@ -114,6 +151,11 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
+resource "aws_route_table_association" "public_b" {
+  subnet_id      = aws_subnet.public_b.id
+  route_table_id = aws_route_table.public.id
+}
+
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.this.id
 
@@ -128,10 +170,13 @@ resource "aws_route_table" "private" {
 }
 
 resource "aws_route_table_association" "private" {
-  for_each = {
-    backend = aws_subnet.backend.id
-    db      = aws_subnet.db.id
-  }
+  for_each = merge(
+    {
+      backend = aws_subnet.backend.id
+      db      = aws_subnet.db.id
+    },
+    { for zone, subnet in aws_subnet.app : "app-${zone}" => subnet.id },
+  )
 
   subnet_id      = each.value
   route_table_id = aws_route_table.private.id

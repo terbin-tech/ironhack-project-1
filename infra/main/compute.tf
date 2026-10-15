@@ -55,5 +55,9 @@ resource "aws_instance" "this" {
   }
 
   # Private hosts need their NAT route before Ansible runs apt.
-  depends_on = [aws_route_table_association.private, aws_route_table_association.public]
+  depends_on = [
+    aws_route_table_association.private,
+    aws_route_table_association.public,
+    aws_route_table_association.public_b,
+  ]
 }
