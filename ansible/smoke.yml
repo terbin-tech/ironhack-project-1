@@ -1,40 +1,23 @@
 ---
-# End to end: a vote cast on the frontend travels through Redis and the worker into Postgres.
+# End to end through the load balancer: a vote cast at the public HTTPS URL
+# travels through Redis and the worker into Postgres.
 
-- name: Gather every host's facts for the private IPs
-  hosts: all:!bastion
-  gather_facts: true
-  tasks: []
-
-- name: Cast a vote and watch it reach Postgres
-  hosts: frontend
+- name: Cast a vote through the load balancer and watch it reach Postgres
+  hosts: localhost
   gather_facts: false
   vars:
     psql: "docker exec db psql -U {{ db_user }} -d {{ db_name }} -tAc"
   tasks:
-    - name: Redis on the backend is reachable from the frontend
-      ansible.builtin.wait_for:
-        host: "{{ backend_ip }}"
-        port: 6379
-        timeout: 10
-
-    - name: Postgres on the db host is reachable from the frontend
-      ansible.builtin.wait_for:
-        host: "{{ db_ip }}"
-        port: 5432
-        timeout: 10
-
     # Unique per run, so the check below sees this vote and no other voter's.
     - name: Pick a voter id for the smoke vote
       ansible.builtin.set_fact:
         marker: "smoke-{{ lookup('ansible.builtin.pipe', 'date +%s%N') }}"
 
     # vote uses the voter_id cookie as the voter id and the worker stores it in votes.id.
-    # The votes table has no unique key, so a repeated POST would add a row.
     - name: Cast a vote
       ansible.builtin.uri:
-        # checkov:skip=CKV2_ANSIBLE_1:the app serves HTTP only; HTTPS is out of scope
-        url: http://localhost/
+        # checkov:skip=CKV2_ANSIBLE_1:app_url is the https:// URL infra/main writes; Checkov cannot read the variable
+        url: "{{ app_url }}"
         method: POST
         body_format: form-urlencoded
         body:
@@ -60,9 +43,9 @@
 
     - name: The result page answers
       ansible.builtin.uri:
-        # checkov:skip=CKV2_ANSIBLE_1:the app serves HTTP only; HTTPS is out of scope
-        url: http://localhost:8080/
+        # checkov:skip=CKV2_ANSIBLE_1:app_url is the https:// URL infra/main writes; Checkov cannot read the variable
+        url: "{{ app_url }}result/"
 
     - name: Report
       ansible.builtin.debug:
-        msg: "vote {{ marker }} reached Postgres; {{ total.stdout }} votes in total"
+        msg: "vote {{ marker }} reached Postgres through {{ app_url }}; {{ total.stdout }} votes in total"

@@ -1,0 +1,31 @@
+#!/bin/bash
+# Starts result on an instance of the baked image (infra/image). Rendered by
+# infra/main. No set -x: cloud-init copies this script's output to
+# /var/log/cloud-init-output.log.
+set -euo pipefail
+
+image='${image}'
+env_file=/run/result.env
+
+# The password goes from Parameter Store into a root-only file under /run and
+# from there into the container's environment. It never appears in user data,
+# on a command line, or on a container's stdout (Docker's default log driver
+# here is awslogs, which would ship it to CloudWatch). The CLI does not take its
+# region from instance metadata, so it is passed.
+umask 077
+until password=$(aws ssm get-parameter --region '${region}' --name '${password_param}' \
+  --with-decryption --query Parameter.Value --output text); do
+  sleep 10
+done
+printf 'PG_PASSWORD=%s\n' "$password" >"$env_file"
+unset password
+
+until docker pull "$image"; do
+  sleep 10
+done
+
+docker run -d --name result --restart unless-stopped -p 80:80 \
+  --env-file "$env_file" \
+  -e PG_HOST='${db_host}' -e PG_USER='${db_user}' -e PG_DATABASE='${db_name}' \
+  "$image"
+rm -f "$env_file"

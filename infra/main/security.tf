@@ -3,23 +3,24 @@
 # Security groups do not filter DNS, instance metadata or Amazon Time Sync.
 
 locals {
-  tiers = toset(["bastion", "frontend", "backend", "db", "alb"])
+  tiers = toset(["bastion", "alb", "vote", "result", "backend", "db"])
 
   # Every tier but the load balancer needs apt, Docker Hub and the AWS APIs.
   host_tiers = setsubtract(local.tiers, ["alb"])
 
   ingress_rules = {
-    bastion_ssh        = { sg = "bastion", port = 22, cidr = var.admin_cidr, peer = null, desc = "SSH from the admin only" }
-    frontend_vote      = { sg = "frontend", port = 80, cidr = "0.0.0.0/0", peer = null, desc = "vote from the internet" }
-    frontend_result    = { sg = "frontend", port = 8080, cidr = "0.0.0.0/0", peer = null, desc = "result from the internet" }
-    frontend_ssh       = { sg = "frontend", port = 22, cidr = null, peer = "bastion", desc = "SSH through the bastion" }
-    backend_redis      = { sg = "backend", port = 6379, cidr = null, peer = "frontend", desc = "Redis from vote" }
-    backend_ssh        = { sg = "backend", port = 22, cidr = null, peer = "bastion", desc = "SSH through the bastion" }
-    db_postgres_worker = { sg = "db", port = 5432, cidr = null, peer = "backend", desc = "Postgres from worker" }
-    db_postgres_result = { sg = "db", port = 5432, cidr = null, peer = "frontend", desc = "Postgres from result" }
-    db_ssh             = { sg = "db", port = 22, cidr = null, peer = "bastion", desc = "SSH through the bastion" }
     alb_http           = { sg = "alb", port = 80, cidr = "0.0.0.0/0", peer = null, desc = "HTTP from the internet, redirected to HTTPS" }
     alb_https          = { sg = "alb", port = 443, cidr = "0.0.0.0/0", peer = null, desc = "HTTPS from the internet" }
+    bastion_ssh        = { sg = "bastion", port = 22, cidr = var.admin_cidr, peer = null, desc = "SSH from the admin only" }
+    vote_http          = { sg = "vote", port = 80, cidr = null, peer = "alb", desc = "vote from the load balancer" }
+    vote_ssh           = { sg = "vote", port = 22, cidr = null, peer = "bastion", desc = "SSH through the bastion" }
+    result_http        = { sg = "result", port = 80, cidr = null, peer = "alb", desc = "result from the load balancer" }
+    result_ssh         = { sg = "result", port = 22, cidr = null, peer = "bastion", desc = "SSH through the bastion" }
+    backend_redis      = { sg = "backend", port = 6379, cidr = null, peer = "vote", desc = "Redis from vote" }
+    backend_ssh        = { sg = "backend", port = 22, cidr = null, peer = "bastion", desc = "SSH through the bastion" }
+    db_postgres_worker = { sg = "db", port = 5432, cidr = null, peer = "backend", desc = "Postgres from worker" }
+    db_postgres_result = { sg = "db", port = 5432, cidr = null, peer = "result", desc = "Postgres from result" }
+    db_ssh             = { sg = "db", port = 22, cidr = null, peer = "bastion", desc = "SSH through the bastion" }
   }
 
   # Every host tier needs apt and Docker Hub.
@@ -31,12 +32,15 @@ locals {
   ]...)
 
   egress_rules = merge(local.web_egress_rules, {
-    bastion_ssh_frontend = { sg = "bastion", port = 22, cidr = null, peer = "frontend", desc = "bastion hop to frontend" }
-    bastion_ssh_backend  = { sg = "bastion", port = 22, cidr = null, peer = "backend", desc = "bastion hop to backend" }
-    bastion_ssh_db       = { sg = "bastion", port = 22, cidr = null, peer = "db", desc = "bastion hop to db" }
-    frontend_redis       = { sg = "frontend", port = 6379, cidr = null, peer = "backend", desc = "vote to Redis" }
-    frontend_postgres    = { sg = "frontend", port = 5432, cidr = null, peer = "db", desc = "result to Postgres" }
-    backend_postgres     = { sg = "backend", port = 5432, cidr = null, peer = "db", desc = "worker to Postgres" }
+    alb_vote            = { sg = "alb", port = 80, cidr = null, peer = "vote", desc = "load balancer to vote" }
+    alb_result          = { sg = "alb", port = 80, cidr = null, peer = "result", desc = "load balancer to result" }
+    bastion_ssh_vote    = { sg = "bastion", port = 22, cidr = null, peer = "vote", desc = "bastion hop to vote" }
+    bastion_ssh_result  = { sg = "bastion", port = 22, cidr = null, peer = "result", desc = "bastion hop to result" }
+    bastion_ssh_backend = { sg = "bastion", port = 22, cidr = null, peer = "backend", desc = "bastion hop to backend" }
+    bastion_ssh_db      = { sg = "bastion", port = 22, cidr = null, peer = "db", desc = "bastion hop to db" }
+    vote_redis          = { sg = "vote", port = 6379, cidr = null, peer = "backend", desc = "vote to Redis" }
+    result_postgres     = { sg = "result", port = 5432, cidr = null, peer = "db", desc = "result to Postgres" }
+    backend_postgres    = { sg = "backend", port = 5432, cidr = null, peer = "db", desc = "worker to Postgres" }
   })
 }
 

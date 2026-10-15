@@ -161,3 +161,44 @@ resource "aws_route53_record" "app" {
     evaluate_target_health = true
   }
 }
+
+resource "aws_cloudwatch_metric_alarm" "unhealthy_targets" {
+  for_each = local.apps
+
+  alarm_name          = "${var.name_prefix}${each.key}-unhealthy"
+  alarm_description   = "A ${each.key} target fails its load balancer health check."
+  namespace           = "AWS/ApplicationELB"
+  metric_name         = "UnHealthyHostCount"
+  statistic           = "Maximum"
+  period              = 60
+  evaluation_periods  = 2
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  ok_actions          = [aws_sns_topic.alarms.arn]
+
+  dimensions = {
+    LoadBalancer = aws_lb.this.arn_suffix
+    TargetGroup  = aws_lb_target_group.app[each.key].arn_suffix
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
+  alarm_name          = "${var.name_prefix}alb-5xx"
+  alarm_description   = "The load balancer itself answered with a 5xx (no healthy target, timeout)."
+  namespace           = "AWS/ApplicationELB"
+  metric_name         = "HTTPCode_ELB_5XX_Count"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  ok_actions          = [aws_sns_topic.alarms.arn]
+
+  dimensions = {
+    LoadBalancer = aws_lb.this.arn_suffix
+  }
+}

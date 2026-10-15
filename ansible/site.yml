@@ -34,17 +34,3 @@
       loop: "{{ groups['db'] }}"
   roles:
     - backend
-
-- name: Frontend tier
-  hosts: frontend
-  become: true
-  pre_tasks:
-    - name: Gather the backend and db hosts' facts so their private IPs are known even under --limit
-      ansible.builtin.setup:
-        gather_subset:
-          - network
-      delegate_to: "{{ item }}"
-      delegate_facts: true
-      loop: "{{ groups['backend'] + groups['db'] }}"
-  roles:
-    - frontend

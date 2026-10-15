@@ -63,3 +63,9 @@ variable "app_hostname" {
   type        = string
   default     = "voting"
 }
+
+variable "dockerhub_user" {
+  description = "Docker Hub user whose vote, result and worker images the stack runs."
+  type        = string
+  default     = "nitramabuar"
+}

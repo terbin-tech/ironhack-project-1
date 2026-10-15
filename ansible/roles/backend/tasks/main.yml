@@ -17,7 +17,7 @@
     name: redis
     image: redis:8
     restart_policy: unless-stopped
-    # Published for vote on the frontend host; the backend security group admits only the frontend.
+    # Published for vote; the backend security group admits only the vote instances.
     published_ports:
       - "6379:6379"
     networks:

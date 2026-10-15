@@ -1,0 +1,16 @@
+#!/bin/bash
+# Starts vote on an instance of the baked image (infra/image). Rendered by
+# infra/main. No set -x: cloud-init copies this script's output to
+# /var/log/cloud-init-output.log.
+set -euo pipefail
+
+image='${image}'
+
+# Right after a network change the NAT route may still be settling; keep trying.
+until docker pull "$image"; do
+  sleep 10
+done
+
+docker run -d --name vote --restart unless-stopped -p 80:80 \
+  -e REDIS_HOST='${redis_host}' \
+  "$image"

@@ -7,19 +7,19 @@ resource "aws_key_pair" "this" {
   public_key = file(pathexpand(var.ssh_public_key_path))
 }
 
+# The fixed hosts Ansible configures. vote and result run in Auto Scaling groups (app.tf).
 locals {
   instances = {
-    bastion  = { subnet_id = aws_subnet.public.id, type = "t3.micro", public = true }
-    frontend = { subnet_id = aws_subnet.public.id, type = "t3.micro", public = true }
-    backend  = { subnet_id = aws_subnet.backend.id, type = "t3.small", public = false }
-    db       = { subnet_id = aws_subnet.db.id, type = "t3.micro", public = false }
+    bastion = { subnet_id = aws_subnet.public.id, type = "t3.micro", public = true }
+    backend = { subnet_id = aws_subnet.backend.id, type = "t3.small", public = false }
+    db      = { subnet_id = aws_subnet.db.id, type = "t3.micro", public = false }
   }
 }
 
 resource "aws_instance" "this" {
   for_each = local.instances
 
-  #checkov:skip=CKV_AWS_88:the bastion (SSH entry) and the frontend (vote, result) are public by design; the load balancer add-on removes the frontend's public IP
+  #checkov:skip=CKV_AWS_88:the bastion is the only public instance, by design
   #checkov:skip=CKV_AWS_135:t3 instances are always EBS-optimized
   #checkov:skip=CKV_AWS_126:5-minute basic metrics are enough for an email alarm on these hosts
 
