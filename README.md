@@ -112,7 +112,7 @@ ansible-playbook -i ansible/inventory.ini ansible/smoke.yml
 - The CloudWatch agent (role `cloudwatch`) sends memory and root disk use, and `/var/log/auth.log` to `martin-ssh`.
 - `container-metrics.sh` runs every minute from a systemd timer and reports `containers_down` and `container_restarts` to the agent over StatsD. Plain Docker on EC2 has no built-in container metrics in CloudWatch.
 - A VPC flow log sends rejected traffic to `martin-vpc-flow`.
-- Alarms email through the SNS topic `martin-alarms`: for each app host, CPU above 80 percent, memory above 90 percent, a container down (or the host silent) and a container restart; for the bastion, a heartbeat.
+- Alarms email through the SNS topic `martin-alarms`: for the backend and database hosts, CPU above 80 percent, memory above 90 percent, a container down (or the host silent) and a container restart; for the bastion, a heartbeat; for the load balancer, unhealthy targets in each target group and any load balancer 5XX. The vote and result Auto Scaling instances have no per-host alarms.
 - The instance role writes only to this stack's log groups and the `CWAgent` metric namespace, and an instance metadata hop limit of 1 keeps it out of the containers.
 
 ```bash
