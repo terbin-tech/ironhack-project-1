@@ -62,7 +62,7 @@ An accepted finding carries its reason in a `checkov:skip` or `hadolint ignore` 
 
 ## Deploy to AWS
 
-Requirements: Terraform 1.11 or newer, Ansible (ansible-core 2.17 or newer), `ssh-keygen` and `openssl` for step 0, and AWS credentials that can manage S3, VPC and EC2 and read the SSM parameter that holds the Ubuntu AMI (`ssm:GetParameter`). The stack bills by the hour while it is up (the NAT gateway and the four instances), so tear it down when you are done.
+Requirements: Terraform 1.11 or newer, Ansible (ansible-core 2.17 or newer), `ssh-keygen` and `openssl` for step 0, and AWS credentials that can manage S3, VPC, EC2, IAM roles and policies, CloudWatch Logs and alarms, and SNS, and read the SSM parameter that holds the Ubuntu AMI (`ssm:GetParameter`). The stack bills by the hour while it is up (the NAT gateway and the four instances), so tear it down when you are done.
 
 To use your own names, set `owner`, `name_prefix` and, if you want, `region` in both modules: in `infra/main/terraform.tfvars`, and for `infra/bootstrap`, which has no tfvars example, with `-var` or a `terraform.tfvars` of your own. The course account only allows `us-east-1` and `eu-central-1`, so no other region passes validation.
 
@@ -80,8 +80,9 @@ cd infra/bootstrap && terraform init && terraform apply   # also writes infra/ma
 
 # 2. Network and hosts
 cd ../main
-cp terraform.tfvars.example terraform.tfvars   # then set admin_cidr to your public IPv4 as a /32, e.g. 203.0.113.7/32
+cp terraform.tfvars.example terraform.tfvars   # then set admin_cidr to your public IPv4 as a /32, e.g. 203.0.113.7/32, and alarm_email to your address
 terraform init -backend-config=backend.hcl && terraform apply
+# AWS emails alarm_email a confirmation link; alarms arrive only after you confirm it
 
 # 3. Containers
 cd ../..
@@ -91,6 +92,23 @@ ansible-playbook -i ansible/inventory.ini --vault-password-file ~/.ansible/ironh
 ```
 
 `terraform -chdir=infra/main output` prints the vote and result URLs.
+
+## Monitoring
+
+- Container logs go to CloudWatch Logs through Docker's `awslogs` log driver, set as the default in `/etc/docker/daemon.json` by the `docker` role: log group `martin-containers`, one stream per container named `<container>/<short id>`. `docker logs` still works.
+- The CloudWatch agent (role `cloudwatch`) sends memory and root disk use, and `/var/log/auth.log` to `martin-ssh`.
+- `container-metrics.sh` runs every minute from a systemd timer and reports `containers_down` and `container_restarts` to the agent over StatsD. Plain Docker on EC2 has no built-in container metrics in CloudWatch.
+- A VPC flow log sends rejected traffic to `martin-vpc-flow`.
+- Alarms email through the SNS topic `martin-alarms`: for each app host, CPU above 80 percent, memory above 90 percent, a container down (or the host silent) and a container restart; for the bastion, a heartbeat.
+- The instance role writes only to this stack's log groups and the `CWAgent` metric namespace, and an instance metadata hop limit of 1 keeps it out of the containers.
+
+```bash
+aws logs tail martin-containers --follow
+aws logs tail martin-ssh --since 1h
+aws cloudwatch describe-alarms --alarm-name-prefix martin- --query 'MetricAlarms[].[AlarmName,StateValue]' --output table
+```
+
+The brief suggests the CloudWatch agent for container logs, but with a wildcard path the agent only ships the most recently written file, and Docker reserves its JSON log files for itself, so the log driver ships them instead.
 
 ## Design notes
 
