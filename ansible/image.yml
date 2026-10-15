@@ -24,3 +24,9 @@
       ansible.builtin.file:
         path: /opt/aws/amazon-cloudwatch-agent/logs/state
         state: absent
+
+    # Each instance generates its own machine id on first boot instead of
+    # sharing the build instance's (cloud-init's best practice for golden images).
+    - name: Clear the build instance's machine id
+      ansible.builtin.command: cloud-init clean --machine-id
+      changed_when: true
