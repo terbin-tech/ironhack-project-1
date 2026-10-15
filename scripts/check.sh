@@ -2,7 +2,8 @@
 # Runs every code check, locally before a push and in CI (.github/workflows/checks.yml).
 # Each check runs even if an earlier one failed; the exit status is 1 if any failed.
 # It installs no tools: terraform init and ansible-lint fetch into gitignored folders on a
-# fresh checkout; run `tflint --init` once to fetch the TFLint aws plugin.
+# fresh checkout, and packer init into Packer's own plugin folder; run `tflint --init` once
+# to fetch the TFLint aws plugin.
 set -uo pipefail
 
 cd "$(dirname "$0")/.." || exit 1
@@ -34,6 +35,13 @@ terraform_validate() {
   return "${status}"
 }
 
+# packer init installs the plugins app.pkr.hcl pins only when they are missing (it reads
+# the local plugin folder and downloads nothing otherwise). validate then needs no AWS
+# credentials, but the ansible provisioner checks that ansible-playbook is on PATH.
+packer_validate() {
+  packer init infra/image >/dev/null && packer validate infra/image
+}
+
 # Tracked and new files only: ansible-lint installs collections into the
 # gitignored ansible/.ansible/, which carry their own scripts and Dockerfiles.
 repo_files() {
@@ -46,6 +54,8 @@ mapfile -t dockerfiles < <(repo_files '*Dockerfile')
 check "terraform fmt" terraform fmt -check -recursive infra
 check "terraform validate" terraform_validate
 check "tflint" tflint --recursive --config "${PWD}/.tflint.hcl"
+check "packer fmt" packer fmt -check -recursive infra/image
+check "packer validate" packer_validate
 # The variables file supplies admin_cidr, without which Checkov cannot expand
 # the security group rules and checks them only vacuously.
 check "checkov" checkov --directory . \
